@@ -47,10 +47,24 @@ public enum ThemeLoader {
     // MARK: - Public API
 
     /// Load the active theme for the given IDE.
+    /// If the configured theme can't be found (e.g. older VS Code, user-installed extension),
+    /// falls back to the first theme file found in the built-in extensions.
     public static func loadActiveTheme(from ide: IDEInfo) throws -> ThemeData {
         let themeName = readActiveThemeName(settingsURL: ide.settingsURL)
-        let themeURL = try findThemeFile(named: themeName, in: ide)
-        return try parseTheme(at: themeURL, fallbackName: themeName)
+
+        // Try the user's configured (or default) theme first.
+        if let url = try? findThemeFile(named: themeName, in: ide) {
+            return try parseTheme(at: url, fallbackName: themeName)
+        }
+
+        // Theme not found by name — pick any theme that actually exists in the built-in
+        // extensions. This handles older VS Code versions where the theme name shipped
+        // with the app differs from the name stored in settings (or from our default).
+        if let url = findAnyTheme(in: ide.builtinExtensionsURL) {
+            return try parseTheme(at: url, fallbackName: themeName)
+        }
+
+        throw LoadError.themeFileNotFound(themeName)
     }
 
     // MARK: - Steps
@@ -77,6 +91,39 @@ public enum ThemeLoader {
             }
         }
         throw LoadError.themeFileNotFound(themeName)
+    }
+
+    /// Returns the first dark theme file found anywhere in the given extensions directory,
+    /// or any theme file if no dark one is present.
+    private static func findAnyTheme(in root: URL) -> URL? {
+        let fm = FileManager.default
+        guard let extensions = try? fm.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: .skipsHiddenFiles
+        ) else { return nil }
+
+        var anyTheme: URL? = nil
+        for extDir in extensions {
+            let themesDir = extDir.appendingPathComponent("themes")
+            guard let themeFiles = try? fm.contentsOfDirectory(
+                at: themesDir,
+                includingPropertiesForKeys: nil,
+                options: .skipsHiddenFiles
+            ) else { continue }
+
+            for file in themeFiles where file.pathExtension == "json" {
+                if anyTheme == nil { anyTheme = file }
+                // Prefer a dark theme — check the `type` field in the JSON.
+                if let data = try? Data(contentsOf: file),
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let type_ = json["type"] as? String,
+                   type_.lowercased() == "dark" {
+                    return file
+                }
+            }
+        }
+        return anyTheme
     }
 
     private static func searchThemes(in root: URL, matching themeName: String) -> URL? {
