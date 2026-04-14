@@ -39,6 +39,10 @@
 				<string>public.php-script</string>
 				<string>com.sun.java-source</string>
 
+				<!-- Markdown — system type (.md) + custom (.markdown) -->
+				<string>net.daringfireball.markdown</string>
+				<string>com.nehagupta.quicklookcode.markdown</string>
+
 				<!-- Custom exported types (declared in UTExportedTypeDeclarations below) -->
 				<string>com.nehagupta.quicklookcode.typescript</string>
 				<string>com.nehagupta.quicklookcode.tsx</string>
@@ -104,6 +108,25 @@
 	     ============================================================ -->
 	<key>UTExportedTypeDeclarations</key>
 	<array>
+
+		<!-- Markdown (.markdown extension — .md is already net.daringfireball.markdown) -->
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.markdown</string>
+			<key>UTTypeDescription</key>
+			<string>Markdown Document</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>net.daringfireball.markdown</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>markdown</string>
+				</array>
+			</dict>
+		</dict>
 
 		<!-- TypeScript (.ts) — Note: macOS maps .ts to public.mpeg-2-transport-stream.
 		     We declare our own type and handle MPEG-2 detection in Phase 4. -->

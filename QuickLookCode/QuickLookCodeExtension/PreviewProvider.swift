@@ -29,6 +29,11 @@ class PreviewProvider: QLPreviewProvider, QLPreviewingController {
 
     /// Attempts syntax-highlighted rendering; falls back to plain text on any failure.
     private func renderHTML(fileURL: URL, fileName: String, ext: String) async -> Data {
+        // Markdown short-circuit — before FileTypeRegistry lookup
+        if ext == "md" || ext == "markdown" {
+            return await renderMarkdown(fileURL: fileURL, fileName: fileName)
+        }
+
         // 1. Identify language
         guard let langInfo = FileTypeRegistry.language(forExtension: ext) else {
             return plainText(fileURL: fileURL, fileName: fileName, reason: "Unsupported file type")
@@ -61,6 +66,27 @@ class PreviewProvider: QLPreviewProvider, QLPreviewingController {
             )
         } catch {
             // Tokenizer failed (e.g. bundle not yet built) — fall back gracefully.
+            return plainText(fileURL: fileURL, fileName: fileName, reason: error.localizedDescription)
+        }
+    }
+
+    // MARK: - Markdown rendering
+
+    private func renderMarkdown(fileURL: URL, fileName: String) async -> Data {
+        guard let ide = IDELocator.preferred else {
+            return plainText(fileURL: fileURL, fileName: fileName, reason: "VS Code not found")
+        }
+        guard let theme = try? ThemeLoader.loadActiveTheme(from: ide) else {
+            return plainText(fileURL: fileURL, fileName: fileName, reason: "Theme could not be loaded")
+        }
+        do {
+            return try await MarkdownRenderer.render(
+                fileURL: fileURL,
+                theme: theme,
+                ide: ide,
+                fileName: fileName
+            )
+        } catch {
             return plainText(fileURL: fileURL, fileName: fileName, reason: error.localizedDescription)
         }
     }

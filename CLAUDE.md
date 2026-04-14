@@ -8,6 +8,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Build from command line
 xcodebuild -project QuickLookCode/QuickLookCode.xcodeproj -scheme QuickLookCode -configuration Debug build
 
+# Install to /Applications (required for proper Quick Look / LS registration)
+cp -R ~/Library/Developer/Xcode/DerivedData/QuickLookCode-*/Build/Products/Debug/QuickLookCode.app /Applications/
+
 # Test the extension on a file
 qlmanage -p path/to/file.swift
 
@@ -20,6 +23,10 @@ pluginkit -m -v | grep quicklook
 
 # Check extension logs
 log stream --predicate 'subsystem contains "quicklookcode"' --level debug
+
+# Rebuild the JS tokenizer bundle (after editing tokenizer/src/tokenizer-jsc.js)
+cd tokenizer && pnpm run build
+# Output goes directly to QuickLookCode/QuickLookCodeShared/Resources/tokenizer-jsc.js
 ```
 
 ## Architecture
@@ -27,8 +34,17 @@ log stream --predicate 'subsystem contains "quicklookcode"' --level debug
 Three Xcode targets, all in `QuickLookCode/QuickLookCode.xcodeproj`:
 
 - **QuickLookCode** — host macOS app (required by macOS to ship an extension). Minimal SwiftUI UI showing IDE detection status and active theme.
-- **QuickLookCodeExtension** — the actual Quick Look preview extension (`QLPreviewProvider`). Entry point: `PreviewProvider.swift`. Currently returns hardcoded HTML.
+- **QuickLookCodeExtension** — the actual Quick Look preview extension (`QLPreviewProvider`). Entry point: `PreviewProvider.swift`. Routes files through the full render pipeline; falls back to plain text on any failure.
 - **QuickLookCodeShared** — framework linked into both targets above. Contains all IDE integration logic.
+
+### Renderer Routing
+
+```
+file extension
+    ├── "md" / "markdown"  →  MarkdownRenderer  →  cmark-gfm + per-block SourceCodeRenderer
+    └── everything else    →  SourceCodeRenderer →  JSC vscode-textmate pipeline
+                                                     both → HTML → QLPreviewReply(.html)
+```
 
 ### Data Flow
 
@@ -36,7 +52,7 @@ Three Xcode targets, all in `QuickLookCode/QuickLookCode.xcodeproj`:
 IDELocator.preferred → IDEInfo (app URL, settings URL, extension paths)
     ├── GrammarLoader(ide) → grammarData(for: "python") → Data (TextMate JSON)
     └── ThemeLoader.loadActiveTheme(from: ide) → ThemeData
-            └── TokenMapper(theme) → color(forScopes: [...]) → "#rrggbb"
+            └── serializeTheme(ThemeData) → IRawTheme JSON → vscode-textmate registry.setTheme
 ```
 
 ### Key Constraints
@@ -70,7 +86,16 @@ SourceCodeRenderer.render(fileURL:grammarData:theme:)
     → HTMLRenderer.render(lines:theme:)    ← inlined-CSS HTML document
 ```
 
-The JS bundle (`tokenizer-jsc.js`) is built via esbuild from `tokenizer/src/tokenizer-jsc.js`. Run `pnpm run build` inside `tokenizer/` after changing JS source.
+The JS bundle (`tokenizer-jsc.js`) is built via esbuild from `tokenizer/src/tokenizer-jsc.js`. The build output goes directly to `QuickLookCode/QuickLookCodeShared/Resources/tokenizer-jsc.js` — no manual copy needed. Run `pnpm run build` inside `tokenizer/` after changing JS source.
+
+**Xcode 16+ `fileSystemSynchronizedGroups`**: The project uses this feature, so adding or removing source files on disk is sufficient — no `project.pbxproj` edits are needed.
+
+**Vendored C libraries**: Two C libraries are vendored under `QuickLookCodeShared/Vendor/`:
+
+- **`Oniguruma/`** — 48 `.c` files. The `COniguruma` module (`module.modulemap`) is imported by `OnigScanner.swift`. Provides native regex for vscode-textmate.
+- **`cmark-gfm/`** — ~60 `.c` files (cmark core + GFM extensions). The `CCmarkGFM` module is imported by `MarkdownRenderer.swift`. Four CMake-generated headers are hand-crafted for macOS (`config.h`, `cmark-gfm_version.h`, `cmark-gfm_export.h`, `cmark-gfm-extensions_export.h`). Two data-only `.inc` files from upstream are renamed to `.h` (`case_fold_switch_data.h`, `entities_data.h`) so `PBXFileSystemSynchronizedRootGroup` treats them as headers rather than attempting to compile them.
+
+Both vendor directories are added to `SWIFT_INCLUDE_PATHS` and `USER_HEADER_SEARCH_PATHS` in `project.pbxproj`.
 
 ### Quick Look Reply
 
@@ -82,7 +107,7 @@ The extension uses **data-based preview** (`QLIsDataBasedPreview: true`), not vi
 - **Phase 1** (IDE Integration) ✅ — IDELocator, GrammarLoader, ThemeLoader complete; ContentView shows live theme info
 - **Phase 2** (Tokenization + HTML output) ✅ — JSC-based vscode-textmate pipeline, HTMLRenderer, FileTypeRegistry
 - **Phase 2.5** (Native library migration) ✅ — `tokenizeLine2` for internal color resolution; native oniguruma C library replacing JS regex shim; `TokenMapper` deleted
-- **Phase 3** (Markdown renderer with cmark-gfm) — planned
+- **Phase 3** (Markdown renderer with cmark-gfm) ✅ — `MarkdownRenderer.swift`, `markdown-styles.css`, cmark-gfm vendored; prose follows system light/dark, code blocks use VS Code theme
 - **Phase 4** (`.ts` TypeScript preview) — **not achievable** via QL extension API; see PLAN.md
 - **Phase 5** (FSEventStream theme watching, font sync, line numbers) — planned
 

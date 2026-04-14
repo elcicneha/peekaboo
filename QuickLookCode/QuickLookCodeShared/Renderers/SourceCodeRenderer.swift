@@ -121,7 +121,7 @@ public enum SourceCodeRenderer {
 
     // MARK: - JSC tokenization
 
-    private static func tokenize(code: String, grammarData: Data, theme: ThemeData) throws -> [[RawToken]] {
+    static func tokenize(code: String, grammarData: Data, theme: ThemeData) throws -> [[RawToken]] {
         guard let grammarJSON = String(data: grammarData, encoding: .utf8) else {
             throw RendererError.grammarNotUTF8
         }
@@ -250,4 +250,4 @@ extension SourceCodeRenderer {
 }
 
 /// Used only as a `Bundle(for:)` anchor to locate the framework's resources.
-private final class BundleAnchor {}
+final class BundleAnchor {}

@@ -1,0 +1,4 @@
+module CCmarkGFM {
+    header "cmark-gfm-core-extensions.h"
+    export *
+}

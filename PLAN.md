@@ -248,16 +248,25 @@ What was built:
 
 ---
 
-### Phase 3 — Markdown Renderer
+### Phase 3 — Markdown Renderer ✅
 **Goal:** `.md` files render as full GitHub-flavored Markdown
 
-1. Add `cmark-gfm` via Swift Package Manager
-2. **MarkdownRenderer**:
-   - Parse `.md` → HTML via cmark-gfm (GFM tables, task lists, strikethrough)
-   - Fenced code blocks: extract language + content, run through vscode-textmate, replace with highlighted HTML
-   - Inline images: convert relative paths to data URIs where possible
-3. **markdown-styles.css** — GitHub-like stylesheet, inlined into HTML output
-4. Dark/light mode: two CSS blocks, `@media (prefers-color-scheme: dark)` switches between them
+**What was built:**
+
+1. ✅ **cmark-gfm vendored** (`QuickLookCodeShared/Vendor/cmark-gfm/`) — full C source (~60 files) from `github/cmark-gfm` 0.29.0.gfm.13. Four CMake-generated headers hand-crafted for macOS. Two upstream `.inc` data files renamed to `.h` to prevent `PBXFileSystemSynchronizedRootGroup` from treating them as compilation units. `CCmarkGFM` module declared in `module.modulemap`.
+
+2. ✅ **`MarkdownRenderer.swift`** (`QuickLookCodeShared/Renderers/MarkdownRenderer.swift`):
+   - Parses `.md`/`.markdown` via cmark-gfm C API with `table`, `tasklist`, `strikethrough`, `autolink` extensions
+   - Post-processes HTML: regex-extracts fenced code blocks, HTML-entity-decodes content, tokenizes via `SourceCodeRenderer.tokenize`, replaces with highlighted spans (inline `style=` from VS Code theme)
+   - Grammar cache per render to avoid re-loading the same language for repeated code blocks
+   - Relative image `src` attributes resolved to data URIs (base64, 2 MB cap); network URLs left as-is
+   - Falls back to plain cmark HTML for unknown languages or tokenizer errors
+
+3. ✅ **`markdown-styles.css`** (`QuickLookCodeShared/Resources/markdown-styles.css`) — GitHub-like prose stylesheet. CSS custom properties with `@media (prefers-color-scheme: dark)` variant. Prose follows system appearance; code blocks always use VS Code theme via inline `style=`.
+
+4. ✅ **`PreviewProvider.swift`** — `md`/`markdown` extension short-circuits before `FileTypeRegistry` lookup, routes to `renderMarkdown`.
+
+5. ✅ **`Info.plist`** — `net.daringfireball.markdown` added to `QLSupportedContentTypes`; custom `com.nehagupta.quicklookcode.markdown` UTType declared for `.markdown` extension.
 
 **Verify:** `qlmanage -p README.md` — tables, task lists, syntax-highlighted code blocks render correctly
 

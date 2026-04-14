@@ -603,20 +603,13 @@
 				PRODUCT_NAME = "$(TARGET_NAME:c99extidentifier)";
 				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma $(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma $(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma $(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma $(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma";
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma $(SRCROOT)/QuickLookCodeShared/Vendor/cmark-gfm";
 				SWIFT_INSTALL_MODULE = YES;
 				SWIFT_INSTALL_OBJC_HEADER = NO;
 				SWIFT_VERSION = 5.0;
 				USER_HEADER_SEARCH_PATHS = (
 					"$(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma",
-					"$(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma",
-					"$(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma",
-					"$(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma",
-					"$(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma",
-					"$(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma",
-					"$(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma",
-					"$(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma",
-					"$(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma",
+					"$(SRCROOT)/QuickLookCodeShared/Vendor/cmark-gfm",
 				);
 				VERSIONING_SYSTEM = "apple-generic";
 				VERSION_INFO_PREFIX = "";
@@ -653,20 +646,13 @@
 				PRODUCT_NAME = "$(TARGET_NAME:c99extidentifier)";
 				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma $(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma $(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma $(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma $(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma";
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma $(SRCROOT)/QuickLookCodeShared/Vendor/cmark-gfm";
 				SWIFT_INSTALL_MODULE = YES;
 				SWIFT_INSTALL_OBJC_HEADER = NO;
 				SWIFT_VERSION = 5.0;
 				USER_HEADER_SEARCH_PATHS = (
 					"$(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma",
-					"$(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma",
-					"$(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma",
-					"$(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma",
-					"$(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma",
-					"$(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma",
-					"$(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma",
-					"$(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma",
-					"$(SRCROOT)/QuickLookCodeShared/Vendor/Oniguruma",
+					"$(SRCROOT)/QuickLookCodeShared/Vendor/cmark-gfm",
 				);
 				VERSIONING_SYSTEM = "apple-generic";
 				VERSION_INFO_PREFIX = "";
