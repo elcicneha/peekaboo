@@ -144,39 +144,97 @@ quick-look/
 
 ---
 
-### Phase 2 — WASM Tokenization + HTML Output
+### Phase 2 — Tokenization + HTML Output (⚠️ working with known gaps)
 **Goal:** Code files render with correct colors in Quick Look
 
-1. **vscode-textmate WASM** — bundle the compiled WASM build
-   - Write `tokenizer.js` glue: initializes WASM, loads grammar JSON, exposes `tokenizeLine(code, grammar)` → array of `{startIndex, endIndex, scopes}`
+**What was built:**
 
-2. **SourceCodeRenderer**:
-   - Determine language from file extension
-   - Load grammar via GrammarLoader
-   - Load token colors via ThemeLoader
-   - Spin up WKWebView (offscreen), load `tokenizer.js` + WASM
-   - Pass file content line by line → get token spans back
-   - Build HTML: each token becomes a `<span style="color:#xxxxxx">` 
-   - Wrap in `<pre>` with theme background color
-   - Return complete HTML to `QLPreviewReply`
+1. ✅ **JSC-based tokenizer** (`tokenizer/src/tokenizer-jsc.js`, built via esbuild)
+   - Uses `vscode-textmate` for tokenization
+   - Runs inside a `JSContext` (JavaScriptCore) — not WKWebView.
+   - Reason: QL extensions are sandboxed and cannot host a WKWebView reliably; JSC runs in-process and returns results synchronously.
+   - Two-step protocol: `initGrammar(grammarJSON)` then `doTokenize(code)` — JSC drains the microtask queue between calls, letting vscode-textmate's Promise-based API resolve without an event loop.
 
-3. **HTMLRenderer** — shared helper that assembles the final HTML shell:
-   - Inlines all CSS (sandbox blocks external loads)
-   - Sets background to theme's `editor.background` color
-   - Sets font to user's preferred monospace font + size
-   - Handles dark/light mode (reads theme type)
+2. ✅ **Native JS regex shim for oniguruma**
+   - `vscode-textmate` normally uses `vscode-oniguruma` (WASM). We can't ship WASM in a QL extension (see "Dead-end: WASM" below), so we wrote our own `makeOnigScanner` that wraps native JS `RegExp`.
+   - Handles the most common oniguruma→JS gaps: `\G` anchor (via slice + `^`), `(?x)` verbose mode (manual stripping), `\p{L}` Unicode props (adds `u` flag), `\x{HHHH}` codepoints, `\h` / `\H` / `\A` / `(?~...)`.
+   - **Known limit**: ~95% of grammar patterns work. Features like `\G` inside lookbehinds, `\K`, atomic groups, and complex absence operators break silently — tokens get mislabeled or skipped.
 
-4. **FileTypeRegistry** — maps file extensions to grammar names:
-   - `.py` → `"python"`, `.swift` → `"swift"`, `.js` → `"javascript"`, `.ts` → `"typescript"`, etc.
-   - 40+ mappings to start
+3. ✅ **SourceCodeRenderer** (`QuickLookCodeShared/Renderers/SourceCodeRenderer.swift`)
+   - File-size guard: caps at 500 KB / 10,000 lines, appends truncation note.
+   - Creates a `JSContext`, loads the bundled `tokenizer-jsc.js`, calls `initGrammar` then `doTokenize`, parses back `[[RawToken]]`.
+   - Uses `TokenMapper` to resolve scope→color, then calls `HTMLRenderer`.
 
-5. **UTType declarations** in `Info.plist`:
-   - All standard system UTTypes (Swift, Python, JS, C, C++, JSON, XML, Shell, Ruby, etc.)
-   - Exported custom UTTypes for: YAML, TOML, Go, Rust, Kotlin, TypeScript (tsx), Dockerfile, GraphQL, etc.
+4. ✅ **HTMLRenderer** (`QuickLookCodeShared/Renderers/HTMLRenderer.swift`)
+   - Self-contained HTML document with inlined CSS (sandbox blocks external loads).
+   - Uses theme's `editor.background` / `editor.foreground`, configurable font + size, optional line-number gutter, truncation note styling.
+   - ⚠️ `1lh` CSS unit is not supported in QL's WebKit — use `em`-based `min-height` instead.
 
-6. **File size guard** — cap at 500KB / 10,000 lines, truncate with message
+5. ✅ **FileTypeRegistry**, **UTType declarations**, **entitlements** — all wired up.
 
-**Verify:** `qlmanage -p` on .py, .swift, .js, .json — colors match VS Code exactly
+6. ✅ **ThemeLoader `include` chain** — VS Code themes (`dark_modern.json`) frequently delegate via `"include": "./dark_plus.json"`. Original parser ignored this and returned zero rules, which caused all tokens to fall back to foreground color. Fixed with recursive `parseTokenColors(from:fileURL:)`.
+
+**Why this isn't good enough:**
+
+Two independent gaps prevent pixel-perfect output:
+
+- **Regex gap** (tokenization layer): Our JS-regex oniguruma approximation silently mislabels tokens whose grammar patterns use features JS regex can't express. Examples seen in the Swift grammar: comments rendered as plain text because of `(?!\G)` wrapper; `import Foundation` misclassified because of `\G` in a lookbehind; function names missed because of `(?x)` verbose patterns. We patched three specific breakages but the underlying engine is still an approximation.
+
+- **Scope→color gap** (mapping layer): `TokenMapper.swift` only handles single-component selectors. VS Code themes (and especially community themes) use multi-component selectors like `"meta.function.body variable.other"` (descendant), parent selectors, and exclusion selectors (`comment - comment.line`). Our mapper splits on spaces and treats the whole string as one prefix to match — none of these advanced forms work. Tokens get a reasonable fallback color, but not the exact color VS Code shows.
+
+**Dead-ends we ruled out:**
+
+- **WASM via WKWebView in the extension** — QL extensions under the App Sandbox can host a WebView but async WASM init fights with the QL reply lifecycle. The WKWebView build (`tokenizer.bundle.js`, ~2 MB) is retained for debugging only.
+- **WASM in JSC** — JSC supports WASM on paper, but WASM JIT requires `com.apple.security.cs.allow-jit`, which QL extensions are not granted. Interpreter fallback is too slow and may be disabled in the sandbox context.
+- **Extending TokenMapper to patch specific selector shapes** — brittle, per-theme whack-a-mole. Not pursued.
+
+---
+
+### Phase 2.5 — Native Library Migration (next)
+**Goal:** Pixel-perfect parity with VS Code by replacing both approximations with the real implementations.
+
+Insight: we're a native macOS binary, not a browser. The reason VS Code ships WASM + hand-rolled TypeScript scope matching is that it runs in Electron. We can link C libraries and call real APIs directly.
+
+**1. Native oniguruma (fixes the regex gap)**
+
+- Add oniguruma C library to the Xcode project. Options:
+  - SwiftPM: wrap the C source in a `.systemLibrary` or vendored SwiftPM package.
+  - Vendored: drop the oniguruma source into `QuickLookCodeShared/Vendor/oniguruma/`, add to build phases.
+  - Prebuilt `.xcframework`: compile once, link into the framework target.
+- Write `OnigScanner.swift` wrapping `onig_new` / `onig_search` / `onig_region_t`. Handle UTF-16 ↔ UTF-8 conversion at the JSC boundary (JS strings are UTF-16; oniguruma supports both encodings — pick one and stay consistent).
+- Expose `createOnigScanner(patterns)` and `createOnigString(str)` to `JSContext` via `setObject(_:forKeyedSubscript:)`. This fulfills `vscode-textmate`'s `IOnigLib` interface.
+- In `tokenizer-jsc.js`, replace the local `jsOnigLib` with `globalThis.onigLib` so the bundle pulls the Swift-provided implementation.
+- **Result:** 100% oniguruma compatibility, native speed, no WASM, no JIT entitlement. ~300 lines of Swift.
+
+**2. Use `tokenizeLine2` for color resolution (fixes the scope→color gap)**
+
+`vscode-textmate` exposes two tokenization APIs. We've been using the wrong one.
+
+- `tokenizeLine(line, ruleStack)` → `[{startIndex, endIndex, scopes}]` — just scope labels; scope→color mapping is left to the caller. **This is what we use today, and it's why TokenMapper exists.**
+- `tokenizeLine2(line, ruleStack)` → `Uint32Array` of packed `(startIndex, metadata)` pairs where `metadata` is a bitfield containing the already-resolved foreground index, background index, and font-style flags. **This is what VS Code itself uses.** The library does scope→color mapping internally, with full support for descendant selectors, parent selectors, exclusion selectors, and specificity scoring.
+
+Changes:
+- In `initGrammar`, also accept a theme object and call `registry.setTheme({ name, settings: tokenColors })`, then capture `registry.getColorMap()` (a `string[]` of hex codes indexed by metadata).
+- In `doTokenize`, switch to `grammar.tokenizeLine2(line, ruleStack)`. Unpack each metadata word:
+  ```
+  foreground = (metadata >> 18) & 0x1FF
+  background = (metadata >> 23) & 0x1FF
+  fontStyle  = (metadata >> 14) & 0x0F   // 1=italic, 2=bold, 4=underline
+  ```
+  Look up the foreground hex in the color map; translate font-style flags to our existing `fontStyle` string format.
+- Return `[{text, color, fontStyle}]` lines to Swift. Swift just renders.
+- **Delete `TokenMapper.swift` entirely.** The library does this correctly; our reimplementation does not.
+
+**3. Clean up**
+
+- Delete the `jsOnigLib` regex approximation, `stripVerbose`, `sanitizePattern`, `buildEntry`, `capturePositions`, `makeOnigScanner` from `tokenizer-jsc.js`. All of it becomes dead code once `globalThis.onigLib` is provided by Swift.
+- Keep the two-step `initGrammar` / `doTokenize` protocol — it still makes sense for JSC.
+- Remove the WKWebView `tokenizer.bundle.js` path + esbuild target unless there's a reason to keep it.
+
+**Verify:**
+- Same Swift source file visually diffed against VS Code — comments, strings, function names, keywords, types, operators all match color-for-color.
+- Spot-check against one or two community themes that use multi-component selectors (e.g. One Dark Pro) to confirm the scope→color fix lands.
+- `qlmanage -p` on .py, .swift, .js, .json, .ts, .rs — colors identical to VS Code.
 
 ---
 
@@ -244,10 +302,11 @@ func isMPEG2(_ url: URL) -> Bool {
 
 | Dependency | Source | Purpose |
 |---|---|---|
-| `vscode-textmate` (WASM) | npm / build step | Code tokenization |
-| TextMate grammars | VS Code installation | Language definitions |
-| User's VS Code theme | VS Code installation | Token colors |
-| `cmark-gfm` | Swift Package Manager | Markdown parsing |
+| `vscode-textmate` | npm, bundled via esbuild | Tokenization + scope→color via `tokenizeLine2` |
+| `oniguruma` (C library) | vendored / SwiftPM / xcframework | Regex engine — linked natively, exposed to JSC from Swift |
+| TextMate grammars | IDE installation (VS Code / Antigravity) | Language definitions |
+| User's active theme | IDE installation | Token colors + font styles |
+| `cmark-gfm` | Swift Package Manager | Markdown parsing (Phase 3) |
 
 ---
 

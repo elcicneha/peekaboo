@@ -2,23 +2,757 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+
+	<!-- ============================================================
+	     Quick Look extension attributes
+	     ============================================================ -->
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionAttributes</key>
 		<dict>
 			<key>QLIsDataBasedPreview</key>
 			<true/>
-			<key>QLSupportedContentTypes</key>
-			<array>
-				<string>public.swift-source</string>
-			</array>
 			<key>QLSupportsSearchableItems</key>
 			<false/>
+
+			<!-- All UTTypes this extension handles.
+			     System-registered types are listed first, then custom exported types. -->
+			<key>QLSupportedContentTypes</key>
+			<array>
+				<!-- Apple / System -->
+				<string>public.swift-source</string>
+				<string>public.objective-c-source</string>
+				<string>public.objective-c-plus-plus-source</string>
+				<string>public.c-source</string>
+				<string>public.c-header</string>
+				<string>public.c-plus-plus-source</string>
+				<string>public.c-plus-plus-header</string>
+				<string>public.python-script</string>
+				<string>public.ruby-script</string>
+				<string>public.shell-script</string>
+				<string>public.perl-script</string>
+				<string>public.javascript</string>
+				<string>public.html</string>
+				<string>public.css</string>
+				<string>public.xml</string>
+				<string>public.json</string>
+				<string>public.php-script</string>
+				<string>com.sun.java-source</string>
+
+				<!-- Custom exported types (declared in UTExportedTypeDeclarations below) -->
+				<string>com.nehagupta.quicklookcode.typescript</string>
+				<string>com.nehagupta.quicklookcode.tsx</string>
+				<string>com.nehagupta.quicklookcode.jsx</string>
+				<string>com.nehagupta.quicklookcode.rust</string>
+				<string>com.nehagupta.quicklookcode.go</string>
+				<string>com.nehagupta.quicklookcode.kotlin</string>
+				<string>com.nehagupta.quicklookcode.kotlin-script</string>
+				<string>com.nehagupta.quicklookcode.dart</string>
+				<string>com.nehagupta.quicklookcode.yaml</string>
+				<string>com.nehagupta.quicklookcode.toml</string>
+				<string>com.nehagupta.quicklookcode.scss</string>
+				<string>com.nehagupta.quicklookcode.sass</string>
+				<string>com.nehagupta.quicklookcode.less</string>
+				<string>com.nehagupta.quicklookcode.graphql</string>
+				<string>com.nehagupta.quicklookcode.dockerfile</string>
+				<string>com.nehagupta.quicklookcode.vue</string>
+				<string>com.nehagupta.quicklookcode.svelte</string>
+				<string>com.nehagupta.quicklookcode.astro</string>
+				<string>com.nehagupta.quicklookcode.elixir</string>
+				<string>com.nehagupta.quicklookcode.sql</string>
+				<string>com.nehagupta.quicklookcode.terraform</string>
+				<string>com.nehagupta.quicklookcode.proto</string>
+				<string>com.nehagupta.quicklookcode.csharp</string>
+				<string>com.nehagupta.quicklookcode.fsharp</string>
+				<string>com.nehagupta.quicklookcode.scala</string>
+				<string>com.nehagupta.quicklookcode.lua</string>
+				<string>com.nehagupta.quicklookcode.r</string>
+				<string>com.nehagupta.quicklookcode.haskell</string>
+				<string>com.nehagupta.quicklookcode.ocaml</string>
+				<string>com.nehagupta.quicklookcode.julia</string>
+				<string>com.nehagupta.quicklookcode.nix</string>
+				<string>com.nehagupta.quicklookcode.zig</string>
+				<string>com.nehagupta.quicklookcode.glsl</string>
+				<string>com.nehagupta.quicklookcode.wgsl</string>
+				<string>com.nehagupta.quicklookcode.solidity</string>
+				<string>com.nehagupta.quicklookcode.prisma</string>
+			</array>
 		</dict>
 		<key>NSExtensionPointIdentifier</key>
 		<string>com.apple.quicklook.preview</string>
 		<key>NSExtensionPrincipalClass</key>
 		<string>$(PRODUCT_MODULE_NAME).PreviewProvider</string>
 	</dict>
+
+	<!-- ============================================================
+	     Custom UTType declarations
+	     These are exported (we define them) so the system registers
+	     the file-extension → UTType mapping.
+	     Conformance to public.source-code makes them text-readable.
+	     ============================================================ -->
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+
+		<!-- TypeScript (.ts) — Note: macOS maps .ts to public.mpeg-2-transport-stream.
+		     We declare our own type and handle MPEG-2 detection in Phase 4. -->
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.typescript</string>
+			<key>UTTypeDescription</key>
+			<string>TypeScript Source</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>ts</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.tsx</string>
+			<key>UTTypeDescription</key>
+			<string>TypeScript JSX Source</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>tsx</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.jsx</string>
+			<key>UTTypeDescription</key>
+			<string>JavaScript JSX Source</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>jsx</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.rust</string>
+			<key>UTTypeDescription</key>
+			<string>Rust Source</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>rs</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.go</string>
+			<key>UTTypeDescription</key>
+			<string>Go Source</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>go</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.kotlin</string>
+			<key>UTTypeDescription</key>
+			<string>Kotlin Source</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>kt</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.kotlin-script</string>
+			<key>UTTypeDescription</key>
+			<string>Kotlin Script</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>kts</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.dart</string>
+			<key>UTTypeDescription</key>
+			<string>Dart Source</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>dart</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.yaml</string>
+			<key>UTTypeDescription</key>
+			<string>YAML Document</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>yaml</string>
+					<string>yml</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.toml</string>
+			<key>UTTypeDescription</key>
+			<string>TOML Document</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>toml</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.scss</string>
+			<key>UTTypeDescription</key>
+			<string>SCSS Stylesheet</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>scss</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.sass</string>
+			<key>UTTypeDescription</key>
+			<string>Sass Stylesheet</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>sass</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.less</string>
+			<key>UTTypeDescription</key>
+			<string>Less Stylesheet</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>less</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.graphql</string>
+			<key>UTTypeDescription</key>
+			<string>GraphQL Document</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>graphql</string>
+					<string>gql</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.dockerfile</string>
+			<key>UTTypeDescription</key>
+			<string>Dockerfile</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>dockerfile</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.vue</string>
+			<key>UTTypeDescription</key>
+			<string>Vue Single-File Component</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>vue</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.svelte</string>
+			<key>UTTypeDescription</key>
+			<string>Svelte Component</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>svelte</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.astro</string>
+			<key>UTTypeDescription</key>
+			<string>Astro Component</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>astro</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.elixir</string>
+			<key>UTTypeDescription</key>
+			<string>Elixir Source</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>ex</string>
+					<string>exs</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.sql</string>
+			<key>UTTypeDescription</key>
+			<string>SQL File</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>sql</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.terraform</string>
+			<key>UTTypeDescription</key>
+			<string>Terraform / HCL File</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>tf</string>
+					<string>hcl</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.proto</string>
+			<key>UTTypeDescription</key>
+			<string>Protocol Buffer Definition</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>proto</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.csharp</string>
+			<key>UTTypeDescription</key>
+			<string>C# Source</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>cs</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.fsharp</string>
+			<key>UTTypeDescription</key>
+			<string>F# Source</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>fs</string>
+					<string>fsx</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.scala</string>
+			<key>UTTypeDescription</key>
+			<string>Scala Source</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>scala</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.lua</string>
+			<key>UTTypeDescription</key>
+			<string>Lua Script</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>lua</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.r</string>
+			<key>UTTypeDescription</key>
+			<string>R Script</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>r</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.haskell</string>
+			<key>UTTypeDescription</key>
+			<string>Haskell Source</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>hs</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.ocaml</string>
+			<key>UTTypeDescription</key>
+			<string>OCaml Source</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>ml</string>
+					<string>mli</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.julia</string>
+			<key>UTTypeDescription</key>
+			<string>Julia Source</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>jl</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.nix</string>
+			<key>UTTypeDescription</key>
+			<string>Nix Expression</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>nix</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.zig</string>
+			<key>UTTypeDescription</key>
+			<string>Zig Source</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>zig</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.glsl</string>
+			<key>UTTypeDescription</key>
+			<string>GLSL Shader</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>glsl</string>
+					<string>vert</string>
+					<string>frag</string>
+					<string>hlsl</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.wgsl</string>
+			<key>UTTypeDescription</key>
+			<string>WebGPU Shader Language</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>wgsl</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.solidity</string>
+			<key>UTTypeDescription</key>
+			<string>Solidity Smart Contract</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>sol</string>
+				</array>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.prisma</string>
+			<key>UTTypeDescription</key>
+			<string>Prisma Schema</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>prisma</string>
+				</array>
+			</dict>
+		</dict>
+
+	</array>
+
 </dict>
 </plist>

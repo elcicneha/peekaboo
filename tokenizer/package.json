@@ -1,0 +1,19 @@
+{
+  "name": "quicklookcode-tokenizer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Bundles vscode-textmate + vscode-oniguruma for use inside a WKWebView",
+  "scripts": {
+    "build": "node esbuild.js",
+    "build:watch": "node esbuild.js --watch"
+  },
+  "dependencies": {
+    "vscode-oniguruma": "^1.7.0",
+    "vscode-textmate": "^9.1.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.21.0"
+  },
+  "packageManager": "pnpm@10.28.0"
+}

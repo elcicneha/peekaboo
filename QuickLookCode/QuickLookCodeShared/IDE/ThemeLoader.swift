@@ -133,7 +133,30 @@ public enum ThemeLoader {
         let background = colors["editor.background"] ?? (isDark ? "#1e1e1e" : "#ffffff")
         let foreground = colors["editor.foreground"] ?? (isDark ? "#d4d4d4" : "#000000")
 
+        let rules = parseTokenColors(from: json, fileURL: url)
+
+        return ThemeData(
+            name: name,
+            isDark: isDark,
+            background: background,
+            foreground: foreground,
+            tokenColors: rules
+        )
+    }
+
+    /// Recursively resolves `include` and collects tokenColors from a JSON object.
+    private static func parseTokenColors(from json: [String: Any], fileURL: URL) -> [TokenColorRule] {
         var rules: [TokenColorRule] = []
+
+        // Follow nested includes depth-first (included rules come first, current file overrides).
+        if let includePath = json["include"] as? String {
+            let includedURL = fileURL.deletingLastPathComponent().appendingPathComponent(includePath)
+            if let includedData = try? Data(contentsOf: includedURL),
+               let includedJSON = try? JSONSerialization.jsonObject(with: includedData) as? [String: Any] {
+                rules += parseTokenColors(from: includedJSON, fileURL: includedURL)
+            }
+        }
+
         if let tokenColors = json["tokenColors"] as? [[String: Any]] {
             for entry in tokenColors {
                 let scopeValue = entry["scope"]
@@ -145,7 +168,6 @@ public enum ThemeLoader {
                 } else {
                     scopes = []
                 }
-
                 let settings = entry["settings"] as? [String: String] ?? [:]
                 rules.append(TokenColorRule(
                     scopes: scopes,
@@ -155,12 +177,6 @@ public enum ThemeLoader {
             }
         }
 
-        return ThemeData(
-            name: name,
-            isDark: isDark,
-            background: background,
-            foreground: foreground,
-            tokenColors: rules
-        )
+        return rules
     }
 }
