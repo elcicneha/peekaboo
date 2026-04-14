@@ -1,42 +1,32 @@
 /**
  * tokenizer-jsc.js — JavaScriptCore-compatible synchronous tokenizer
  *
- * Key differences from tokenizer.js (WKWebView build):
- *  - No WASM / oniguruma — uses native JS RegExp as the onig implementation.
- *    This works for ~95% of TextMate grammar patterns. Patterns that use
- *    oniguruma-specific syntax (e.g. \h, absence operator) are silently skipped.
- *  - Everything is synchronous — JSC has no event loop, so we use a two-step
- *    protocol: initGrammar() queues Promise resolution, then doTokenize() runs
- *    after JSC drains the microtask queue automatically post-call.
- *  - Uses globalThis instead of window (JSC has no window).
+ * Uses vscode-textmate's tokenizeLine2 to produce packed metadata, resolves
+ * foreground colors via the registry's internal color map, and returns flat
+ * {text, color, fontStyle} spans to Swift. This moves scope-to-color matching
+ * (descendant/parent/exclusion selectors, specificity scoring) into the
+ * library — which is what VS Code itself does.
+ *
+ * Still using a native JS RegExp approximation for oniguruma; Part B will
+ * replace that with a Swift-provided onigLib.
  *
  * Swift protocol:
- *   1. globalThis.initGrammar(grammarJSON: string)  — call once per render
+ *   1. globalThis.initGrammar(grammarJSON: string, themeJSON: string)
  *   2. (JSC drains microtasks automatically after the call returns)
- *   3. globalThis.doTokenize(code: string) → Array<Array<{text,scopes}>>
+ *   3. globalThis.doTokenize(code: string)
+ *        → Array<Array<{text, color, fontStyle}>>
  */
 
 import { Registry, INITIAL } from "vscode-textmate";
 
 // ---------------------------------------------------------------------------
-// Native JS regex — approximate oniguruma implementation
+// Native JS regex — approximate oniguruma implementation (replaced in Part B)
 // ---------------------------------------------------------------------------
 
-// Does the raw pattern string contain \G (oniguruma "current position" anchor)?
 const HAS_G_ANCHOR = /\\G/;
-// Does the pattern use Unicode property escapes (\p{L} etc.)? Needs 'u' flag in JS.
 const HAS_UNICODE_PROP = /\\[pP]\{/;
 
-// ---------------------------------------------------------------------------
-// Verbose-mode (?x) stripping
-// ---------------------------------------------------------------------------
-
-/**
- * Strip whitespace and # comments from an oniguruma (?x) verbose-mode pattern.
- * Whitespace inside character classes [...] is preserved.
- */
 function stripVerbose(p) {
-    // Remove the leading (?x) or variant like (?xi), (?sx), etc.
     let s = p.replace(/^\(\?[a-zA-Z]*x[a-zA-Z]*\)/, "");
     let result = "";
     let inClass = false;
@@ -44,7 +34,6 @@ function stripVerbose(p) {
     while (i < s.length) {
         const c = s[i];
         if (c === "\\") {
-            // Escaped character — always preserve both chars verbatim.
             result += s[i] + (s[i + 1] ?? "");
             i += 2;
             continue;
@@ -53,7 +42,6 @@ function stripVerbose(p) {
         if ( inClass && c === "]") { inClass = false; result += c; i++; continue; }
         if (!inClass) {
             if (c === "#") {
-                // Comment — skip to end of line.
                 while (i < s.length && s[i] !== "\n") i++;
                 continue;
             }
@@ -69,53 +57,34 @@ function stripVerbose(p) {
 }
 
 function sanitizePattern(p) {
-    // Handle verbose mode (?x) — must be done before other replacements.
     if (/^\(\?[a-zA-Z]*x[a-zA-Z]*\)/.test(p)) p = stripVerbose(p);
-
     return p
-        .replace(/\\x\{([0-9a-fA-F]+)\}/g, "\\u{$1}") // \x{HHHH} → \u{HHHH} (needs u flag)
-        .replace(/\\h/g, "[0-9a-fA-F]")                // hex digit class
-        .replace(/\\H/g, "[^0-9a-fA-F]")               // non-hex digit class
-        .replace(/\\A/g, "")                            // \A start-of-input — drop, ^ implied for G-patterns
-        .replace(/\(\?~[^)]+\)/g, "(?:)");              // absence operator → no-op
+        .replace(/\\x\{([0-9a-fA-F]+)\}/g, "\\u{$1}")
+        .replace(/\\h/g, "[0-9a-fA-F]")
+        .replace(/\\H/g, "[^0-9a-fA-F]")
+        .replace(/\\A/g, "")
+        .replace(/\(\?~[^)]+\)/g, "(?:)");
 }
 
-/**
- * Build a compiled entry for a pattern.
- *
- * Two special cases:
- *  - \G patterns: replace \G with ^ and test on a slice from startPosition,
- *    so ^ anchors naturally to startPosition. No 'g' flag (single exec on slice).
- *  - \p{...} patterns: require the 'u' flag for Unicode property escapes.
- */
 function buildEntry(pattern) {
-    const hasGAnchor    = HAS_G_ANCHOR.test(pattern);
-    const hasUnicode    = HAS_UNICODE_PROP.test(pattern);
+    const hasGAnchor = HAS_G_ANCHOR.test(pattern);
+    const hasUnicode = HAS_UNICODE_PROP.test(pattern);
 
     const adjusted = hasGAnchor
         ? sanitizePattern(pattern).replace(/\\G/g, "^")
         : sanitizePattern(pattern);
 
-    // 'g' flag: needed for non-\G patterns so lastIndex works correctly.
-    // 'u' flag: needed for \p{...} and \u{HHHH} to work.
     const flags = (hasGAnchor ? "" : "g") + (hasUnicode ? "u" : "");
 
     let re;
     try {
         re = new RegExp(adjusted, flags);
     } catch (_) {
-        // Fallback: try without 'u' (loses Unicode properties but may recover)
         try { re = new RegExp(adjusted, hasGAnchor ? "" : "g"); } catch (_) { re = null; }
     }
     return { re, hasGAnchor };
 }
 
-/**
- * Approximate capture group start/end positions without the 'd' flag.
- * Capture[0] is exact (full match). Captures 1..N are approximated by
- * finding the capture text inside the full match — imprecise for repeated
- * substrings but correct for the vast majority of grammar captures.
- */
 function capturePositions(m, matchStart) {
     const full = m[0];
     const positions = [{
@@ -162,7 +131,6 @@ function makeOnigScanner(patterns) {
 
                 let m, matchStart;
                 if (hasGAnchor) {
-                    // \G patterns: test on a slice so ^ anchors to startPosition.
                     const slice = str.slice(startPosition);
                     m = re.exec(slice);
                     if (!m) continue;
@@ -174,7 +142,6 @@ function makeOnigScanner(patterns) {
                     matchStart = m.index;
                 }
 
-                // Pick earliest match; on tie, first pattern wins (loop order).
                 if (matchStart < bestStart) {
                     bestMatch = m;
                     bestStart = matchStart;
@@ -198,20 +165,48 @@ const jsOnigLib = {
 };
 
 // ---------------------------------------------------------------------------
+// tokenizeLine2 metadata layout (vscode-textmate MetadataConsts)
+// ---------------------------------------------------------------------------
+//   bits  0-7   language id     (ignored here)
+//   bits  8-9   token type      (ignored here)
+//   bit  10     balanced bracket flag
+//   bits 11-14  font style      (1=italic, 2=bold, 4=underline, 8=strikethrough)
+//   bits 15-23  foreground index into color map
+//   bits 24-31  background index into color map (ignored — we use theme.background)
+
+const FONT_STYLE_OFFSET = 11;
+const FOREGROUND_OFFSET = 15;
+const FONT_STYLE_MASK = 0xF;
+const FOREGROUND_MASK = 0x1FF;
+
+// ---------------------------------------------------------------------------
 // Two-step protocol globals
 // ---------------------------------------------------------------------------
 
 let _grammar = null;
+let _colorMap = null;
 
-globalThis.initGrammar = function initGrammar(grammarJSON) {
+globalThis.initGrammar = function initGrammar(grammarJSON, themeJSON) {
     _grammar = null;
+    _colorMap = null;
+
     let grammarDef;
     try {
         grammarDef = JSON.parse(grammarJSON);
     } catch (e) {
-        console.error("initGrammar: failed to parse grammarJSON:", e.message);
+        console.error("initGrammar: failed to parse grammarJSON: " + e.message);
         return;
     }
+
+    let theme = null;
+    if (themeJSON) {
+        try {
+            theme = JSON.parse(themeJSON);
+        } catch (e) {
+            console.error("initGrammar: failed to parse themeJSON: " + e.message);
+        }
+    }
+
     const scopeName = grammarDef.scopeName;
 
     const registry = new Registry({
@@ -222,9 +217,13 @@ globalThis.initGrammar = function initGrammar(grammarJSON) {
                 : Promise.resolve(null),
     });
 
-    // loadGrammar returns a Promise. Because our onigLib and loadGrammar
-    // callbacks are synchronously resolved, JSC will drain the microtask queue
-    // after this call returns — so _grammar will be set before doTokenize runs.
+    if (theme) {
+        registry.setTheme(theme);
+        _colorMap = registry.getColorMap();
+    }
+
+    // loadGrammar returns a Promise; JSC drains the microtask queue after this
+    // call returns, so _grammar is set before doTokenize runs.
     registry.loadGrammar(scopeName).then((g) => {
         _grammar = g;
     });
@@ -238,17 +237,43 @@ globalThis.doTokenize = function doTokenize(code) {
     const result = [];
 
     for (const line of lines) {
-        const { tokens, ruleStack: nextStack } = _grammar.tokenizeLine(
+        const { tokens, ruleStack: nextStack } = _grammar.tokenizeLine2(
             line,
             ruleStack
         );
         ruleStack = nextStack;
-        result.push(
-            tokens.map((t) => ({
-                text: line.slice(t.startIndex, t.endIndex),
-                scopes: t.scopes,
-            }))
-        );
+
+        const lineTokens = [];
+        const len = tokens.length;
+        for (let i = 0; i < len; i += 2) {
+            const start = tokens[i];
+            const metadata = tokens[i + 1];
+            const end = i + 2 < len ? tokens[i + 2] : line.length;
+            if (end <= start) continue;
+
+            const fgIdx = (metadata >>> FOREGROUND_OFFSET) & FOREGROUND_MASK;
+            const fsFlags = (metadata >>> FONT_STYLE_OFFSET) & FONT_STYLE_MASK;
+
+            const color = (_colorMap && fgIdx > 0) ? (_colorMap[fgIdx] || null) : null;
+
+            let fontStyle = null;
+            if (fsFlags) {
+                const parts = [];
+                if (fsFlags & 1) parts.push("italic");
+                if (fsFlags & 2) parts.push("bold");
+                if (fsFlags & 4) parts.push("underline");
+                if (fsFlags & 8) parts.push("strikethrough");
+                fontStyle = parts.join(" ");
+            }
+
+            lineTokens.push({
+                text: line.slice(start, end),
+                color,
+                fontStyle,
+            });
+        }
+
+        result.push(lineTokens);
     }
 
     return result;

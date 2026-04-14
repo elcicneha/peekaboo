@@ -12,6 +12,10 @@
 //    • JSC automatically drains the microtask queue after each API call, which lets
 //      us use vscode-textmate's Promise-based API without an async event loop.
 //
+//  Color resolution happens inside vscode-textmate via `tokenizeLine2` + the registry's
+//  color map, so scope→color matching (descendant/parent/exclusion selectors,
+//  specificity scoring) is handled by the library — identical to VS Code.
+//
 
 import Foundation
 import JavaScriptCore
@@ -31,12 +35,14 @@ public enum SourceCodeRenderer {
         case resourceNotFound(String)
         case tokenizationFailed(String)
         case grammarNotUTF8
+        case themeSerializationFailed
 
         public var errorDescription: String? {
             switch self {
-            case .resourceNotFound(let r):   return "Resource not found: \(r)"
-            case .tokenizationFailed(let r): return "Tokenization failed: \(r)"
-            case .grammarNotUTF8:            return "Grammar file is not valid UTF-8"
+            case .resourceNotFound(let r):      return "Resource not found: \(r)"
+            case .tokenizationFailed(let r):    return "Tokenization failed: \(r)"
+            case .grammarNotUTF8:               return "Grammar file is not valid UTF-8"
+            case .themeSerializationFailed:    return "Could not serialize theme for tokenizer"
             }
         }
     }
@@ -54,15 +60,14 @@ public enum SourceCodeRenderer {
     ) async throws -> Data {
         let (content, truncationNote) = readFile(at: fileURL)
 
-        let rawLines = try tokenize(code: content, grammarData: grammarData)
+        let rawLines = try tokenize(code: content, grammarData: grammarData, theme: theme)
 
-        let mapper = TokenMapper(theme: theme)
         let spanLines: [[HTMLRenderer.TokenSpan]] = rawLines.map { line in
             line.map { raw in
                 HTMLRenderer.TokenSpan(
                     text: raw.text,
-                    color: mapper.color(forScopes: raw.scopes),
-                    fontStyle: mapper.fontStyle(forScopes: raw.scopes)
+                    color: raw.color,
+                    fontStyle: raw.fontStyle
                 )
             }
         }
@@ -116,10 +121,12 @@ public enum SourceCodeRenderer {
 
     // MARK: - JSC tokenization
 
-    private static func tokenize(code: String, grammarData: Data) throws -> [[RawToken]] {
+    private static func tokenize(code: String, grammarData: Data, theme: ThemeData) throws -> [[RawToken]] {
         guard let grammarJSON = String(data: grammarData, encoding: .utf8) else {
             throw RendererError.grammarNotUTF8
         }
+
+        let themeJSON = try serializeTheme(theme)
 
         let bundle = Bundle(for: BundleAnchor.self)
         guard let bundleURL = bundle.url(forResource: "tokenizer-jsc", withExtension: "js") else {
@@ -137,7 +144,6 @@ public enum SourceCodeRenderer {
 
         let context = JSContext()!
         context.exceptionHandler = { _, exception in
-            // Errors are non-fatal; doTokenize will return null and we'll fall through.
             guard let msg = exception?.toString() else { return }
             NSLog("[QuickLookCode] JSC: %@", msg)
         }
@@ -148,14 +154,13 @@ public enum SourceCodeRenderer {
         // Load the vscode-textmate bundle.
         context.evaluateScript(bundleScript)
 
-        // Step 1 — init grammar.
-        // After this call, JSC drains its microtask queue automatically.
-        // Because our onigLib and loadGrammar callbacks resolve synchronously,
-        // _grammar is set before the call returns to Swift.
+        // Step 1 — init grammar + theme.
+        // After this call, JSC drains its microtask queue automatically, so
+        // _grammar is set before doTokenize runs.
         let initFn = context.objectForKeyedSubscript("initGrammar")
-        initFn?.call(withArguments: [grammarJSON])
+        initFn?.call(withArguments: [grammarJSON, themeJSON])
 
-        // Step 2 — tokenize. Returns an Array<Array<{text,scopes}>> or null.
+        // Step 2 — tokenize. Returns Array<Array<{text, color, fontStyle}>> or null.
         let tokenizeFn = context.objectForKeyedSubscript("doTokenize")
         let result = tokenizeFn?.call(withArguments: [code])
 
@@ -174,13 +179,58 @@ public enum SourceCodeRenderer {
             guard let line = lineAny as? [Any] else { return [] }
             return line.compactMap { tokenAny -> RawToken? in
                 guard
-                    let token  = tokenAny as? [String: Any],
-                    let text   = token["text"]   as? String,
-                    let scopes = token["scopes"] as? [String]
+                    let token = tokenAny as? [String: Any],
+                    let text  = token["text"] as? String
                 else { return nil }
-                return RawToken(text: text, scopes: scopes)
+                let color = token["color"] as? String
+                let fontStyle = token["fontStyle"] as? String
+                return RawToken(text: text, color: color, fontStyle: fontStyle)
             }
         }
+    }
+
+    // MARK: - Theme serialization
+
+    /// Builds an `IRawTheme`-shaped JSON blob for `vscode-textmate`'s `Registry.setTheme`.
+    ///
+    /// The first settings entry carries the theme's default foreground/background so
+    /// tokens with no matching rule still get the correct default. Remaining entries
+    /// mirror the theme's `tokenColors` array one-for-one.
+    private static func serializeTheme(_ theme: ThemeData) throws -> String {
+        var settings: [[String: Any]] = []
+
+        settings.append([
+            "settings": [
+                "foreground": theme.foreground,
+                "background": theme.background,
+            ],
+        ])
+
+        for rule in theme.tokenColors {
+            var tokenSettings: [String: String] = [:]
+            if let fg = rule.foreground { tokenSettings["foreground"] = fg }
+            if let fs = rule.fontStyle { tokenSettings["fontStyle"] = fs }
+            if tokenSettings.isEmpty { continue }
+
+            var entry: [String: Any] = ["settings": tokenSettings]
+            if !rule.scopes.isEmpty {
+                entry["scope"] = rule.scopes
+            }
+            settings.append(entry)
+        }
+
+        let themeObj: [String: Any] = [
+            "name": theme.name,
+            "settings": settings,
+        ]
+
+        guard
+            let data = try? JSONSerialization.data(withJSONObject: themeObj),
+            let json = String(data: data, encoding: .utf8)
+        else {
+            throw RendererError.themeSerializationFailed
+        }
+        return json
     }
 }
 
@@ -189,7 +239,8 @@ public enum SourceCodeRenderer {
 extension SourceCodeRenderer {
     struct RawToken {
         let text: String
-        let scopes: [String]
+        let color: String?
+        let fontStyle: String?
     }
 }
 

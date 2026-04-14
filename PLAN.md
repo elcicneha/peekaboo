@@ -190,48 +190,47 @@ Two independent gaps prevent pixel-perfect output:
 
 ---
 
-### Phase 2.5 — Native Library Migration (next)
+### Phase 2.5 — Native Library Migration (in progress)
 **Goal:** Pixel-perfect parity with VS Code by replacing both approximations with the real implementations.
 
 Insight: we're a native macOS binary, not a browser. The reason VS Code ships WASM + hand-rolled TypeScript scope matching is that it runs in Electron. We can link C libraries and call real APIs directly.
 
-**1. Native oniguruma (fixes the regex gap)**
+**Part A — `tokenizeLine2` for color resolution ✅ (fixes the scope→color gap)**
 
-- Add oniguruma C library to the Xcode project. Options:
-  - SwiftPM: wrap the C source in a `.systemLibrary` or vendored SwiftPM package.
-  - Vendored: drop the oniguruma source into `QuickLookCodeShared/Vendor/oniguruma/`, add to build phases.
-  - Prebuilt `.xcframework`: compile once, link into the framework target.
-- Write `OnigScanner.swift` wrapping `onig_new` / `onig_search` / `onig_region_t`. Handle UTF-16 ↔ UTF-8 conversion at the JSC boundary (JS strings are UTF-16; oniguruma supports both encodings — pick one and stay consistent).
+`vscode-textmate` exposes two tokenization APIs. We were using the wrong one.
+
+- `tokenizeLine(line, ruleStack)` → `[{startIndex, endIndex, scopes}]` — just scope labels; scope→color mapping left to the caller. This is what we used, and it's why `TokenMapper` existed.
+- `tokenizeLine2(line, ruleStack)` → `Uint32Array` of packed `(startIndex, metadata)` pairs where `metadata` is a bitfield containing the already-resolved foreground index, background index, and font-style flags. This is what VS Code itself uses. The library handles scope→color mapping internally — descendant selectors, parent selectors, exclusion selectors, specificity scoring — all correctly.
+
+What was built:
+
+1. ✅ **[tokenizer-jsc.js](tokenizer/src/tokenizer-jsc.js) rewritten** — `initGrammar(grammarJSON, themeJSON)` now calls `registry.setTheme(theme)` and captures `registry.getColorMap()` before kicking off grammar load. `doTokenize` uses `grammar.tokenizeLine2(...)` and unpacks metadata using the real `MetadataConsts` offsets:
+   ```
+   fontStyle  = (metadata >>> 11) & 0xF    // 1=italic, 2=bold, 4=underline, 8=strikethrough
+   foreground = (metadata >>> 15) & 0x1FF  // index into color map
+   ```
+   Returns `[{text, color, fontStyle}]` lines. Swift just renders.
+
+2. ✅ **[SourceCodeRenderer.swift](QuickLookCode/QuickLookCodeShared/Renderers/SourceCodeRenderer.swift) — theme serialization** — `serializeTheme(ThemeData)` builds an `IRawTheme`-shaped JSON blob:
+   - First settings entry carries the theme's `editor.foreground` / `editor.background` so tokens with no matching rule still get the correct default
+   - Remaining entries mirror `ThemeData.tokenColors` one-for-one (scope array + foreground + fontStyle)
+   - Passed as second arg to `initGrammar` on every render
+
+3. ✅ **`TokenMapper` deleted** — [TokenMapper.swift](QuickLookCode/QuickLookCodeShared/IDE/TokenMapper.swift) removed. The project uses Xcode 16+ `fileSystemSynchronizedGroups`, so no `project.pbxproj` edits were needed — removing the file from disk was sufficient. The render pipeline is now: `tokenize(code, grammar, theme) → [[{text, color, fontStyle}]] → HTMLRenderer.TokenSpan` with no Swift-side scope matching.
+
+4. ✅ **`ThemeData` / `ThemeLoader` unchanged** — the loader still produces `ThemeData` with `tokenColors: [TokenColorRule]`; `serializeTheme` just re-encodes that into VS Code's wire format for `setTheme`. The `include` chain resolution we added in Phase 2 still feeds in correctly.
+
+**Part B — Native oniguruma (next; fixes the regex gap)**
+
+- Vendor oniguruma C source into `QuickLookCode/QuickLookCodeShared/Vendor/oniguruma/` and add to the framework target's Compile Sources (chosen over SwiftPM and xcframework to keep everything in one Xcode project).
+- Write `OnigScanner.swift` wrapping `onig_new` / `onig_search` / `onig_region_t`. Pick one encoding (UTF-8) and stay consistent; JS strings are UTF-16 so convert at the JSC boundary.
 - Expose `createOnigScanner(patterns)` and `createOnigString(str)` to `JSContext` via `setObject(_:forKeyedSubscript:)`. This fulfills `vscode-textmate`'s `IOnigLib` interface.
-- In `tokenizer-jsc.js`, replace the local `jsOnigLib` with `globalThis.onigLib` so the bundle pulls the Swift-provided implementation.
+- In [tokenizer-jsc.js](tokenizer/src/tokenizer-jsc.js), replace the inline `jsOnigLib` with `globalThis.onigLib`.
+- Delete the JS regex shim: `jsOnigLib`, `stripVerbose`, `sanitizePattern`, `buildEntry`, `capturePositions`, `makeOnigScanner` all become dead code.
+- Remove the WKWebView `tokenizer.bundle.js` path + esbuild target unless there's a reason to keep it.
 - **Result:** 100% oniguruma compatibility, native speed, no WASM, no JIT entitlement. ~300 lines of Swift.
 
-**2. Use `tokenizeLine2` for color resolution (fixes the scope→color gap)**
-
-`vscode-textmate` exposes two tokenization APIs. We've been using the wrong one.
-
-- `tokenizeLine(line, ruleStack)` → `[{startIndex, endIndex, scopes}]` — just scope labels; scope→color mapping is left to the caller. **This is what we use today, and it's why TokenMapper exists.**
-- `tokenizeLine2(line, ruleStack)` → `Uint32Array` of packed `(startIndex, metadata)` pairs where `metadata` is a bitfield containing the already-resolved foreground index, background index, and font-style flags. **This is what VS Code itself uses.** The library does scope→color mapping internally, with full support for descendant selectors, parent selectors, exclusion selectors, and specificity scoring.
-
-Changes:
-- In `initGrammar`, also accept a theme object and call `registry.setTheme({ name, settings: tokenColors })`, then capture `registry.getColorMap()` (a `string[]` of hex codes indexed by metadata).
-- In `doTokenize`, switch to `grammar.tokenizeLine2(line, ruleStack)`. Unpack each metadata word:
-  ```
-  foreground = (metadata >> 18) & 0x1FF
-  background = (metadata >> 23) & 0x1FF
-  fontStyle  = (metadata >> 14) & 0x0F   // 1=italic, 2=bold, 4=underline
-  ```
-  Look up the foreground hex in the color map; translate font-style flags to our existing `fontStyle` string format.
-- Return `[{text, color, fontStyle}]` lines to Swift. Swift just renders.
-- **Delete `TokenMapper.swift` entirely.** The library does this correctly; our reimplementation does not.
-
-**3. Clean up**
-
-- Delete the `jsOnigLib` regex approximation, `stripVerbose`, `sanitizePattern`, `buildEntry`, `capturePositions`, `makeOnigScanner` from `tokenizer-jsc.js`. All of it becomes dead code once `globalThis.onigLib` is provided by Swift.
-- Keep the two-step `initGrammar` / `doTokenize` protocol — it still makes sense for JSC.
-- Remove the WKWebView `tokenizer.bundle.js` path + esbuild target unless there's a reason to keep it.
-
-**Verify:**
+**Verify (after Part B):**
 - Same Swift source file visually diffed against VS Code — comments, strings, function names, keywords, types, operators all match color-for-color.
 - Spot-check against one or two community themes that use multi-component selectors (e.g. One Dark Pro) to confirm the scope→color fix lands.
 - `qlmanage -p` on .py, .swift, .js, .json, .ts, .rs — colors identical to VS Code.
