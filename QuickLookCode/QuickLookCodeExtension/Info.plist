@@ -43,10 +43,39 @@
 				<string>net.daringfireball.markdown</string>
 				<string>com.nehagupta.quicklookcode.markdown</string>
 
+				<!-- Xcode declares com.microsoft.typescript (apple-internal, trusted) for .ts and .tsx.
+				     Our custom UTType export loses, so we must also claim this type directly. -->
+				<string>com.microsoft.typescript</string>
+
+				<!-- YAML — public.yaml is a system type that wins over our custom export -->
+				<string>public.yaml</string>
+
+				<!-- Property List — com.apple.property-list wins over public.xml -->
+				<string>com.apple.property-list</string>
+
+				<!-- Make (.mk) — public.make-source is a system type -->
+				<string>public.make-source</string>
+
+				<!-- R script — macOS maps .r to Apple Rez source, not R script -->
+				<string>com.apple.rez-source</string>
+
+				<!-- Protocol Buffers — public.protobuf-source is a system type -->
+				<string>public.protobuf-source</string>
+
+				<!-- GLSL variants — Khronos system types win over our custom export -->
+				<string>org.khronos.glsl-source</string>
+				<string>org.khronos.glsl.vertex-shader</string>
+				<string>org.khronos.glsl.fragment-shader</string>
+				<string>org.khronos.glsl.geometry-shader</string>
+
+				<!-- HLSL — Xcode declares com.microsoft.hlsl as apple-internal trusted -->
+				<string>com.microsoft.hlsl</string>
+
 				<!-- Custom exported types (declared in UTExportedTypeDeclarations below) -->
 				<string>com.nehagupta.quicklookcode.typescript</string>
 				<string>com.nehagupta.quicklookcode.tsx</string>
 				<string>com.nehagupta.quicklookcode.jsx</string>
+				<string>com.nehagupta.quicklookcode.cjs</string>
 				<string>com.nehagupta.quicklookcode.rust</string>
 				<string>com.nehagupta.quicklookcode.go</string>
 				<string>com.nehagupta.quicklookcode.kotlin</string>
@@ -80,8 +109,6 @@
 				<string>com.nehagupta.quicklookcode.wgsl</string>
 				<string>com.nehagupta.quicklookcode.solidity</string>
 				<string>com.nehagupta.quicklookcode.prisma</string>
-
-				<!-- New additions -->
 				<string>com.nehagupta.quicklookcode.typescript-module</string>
 				<string>com.nehagupta.quicklookcode.python-stub</string>
 				<string>com.nehagupta.quicklookcode.korn-shell</string>
@@ -89,9 +116,21 @@
 				<string>com.nehagupta.quicklookcode.handlebars</string>
 				<string>com.nehagupta.quicklookcode.pug</string>
 				<string>com.nehagupta.quicklookcode.properties</string>
+				<string>com.nehagupta.quicklookcode.ini</string>
+				<string>com.nehagupta.quicklookcode.dotenv</string>
+				<string>com.nehagupta.quicklookcode.editorconfig</string>
 				<string>com.nehagupta.quicklookcode.latex</string>
 				<string>com.nehagupta.quicklookcode.literate-haskell</string>
+				<string>com.nehagupta.quicklookcode.clojure</string>
 				<string>com.nehagupta.quicklookcode.clojure-common</string>
+				<string>com.nehagupta.quicklookcode.elm</string>
+				<string>com.nehagupta.quicklookcode.erlang</string>
+				<string>com.nehagupta.quicklookcode.fish</string>
+				<string>com.nehagupta.quicklookcode.groovy</string>
+				<string>com.nehagupta.quicklookcode.jsonc</string>
+				<string>com.nehagupta.quicklookcode.powershell</string>
+				<string>com.nehagupta.quicklookcode.vb</string>
+				<string>com.nehagupta.quicklookcode.vim</string>
 			</array>
 		</dict>
 		<key>NSExtensionPointIdentifier</key>
@@ -983,6 +1022,255 @@
 				<key>public.filename-extension</key>
 				<array>
 					<string>cljc</string>
+				</array>
+			</dict>
+		</dict>
+
+		<!-- Clojure (.clj, .cljs) — no system type exists -->
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.clojure</string>
+			<key>UTTypeDescription</key>
+			<string>Clojure Source</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>clj</string>
+					<string>cljs</string>
+				</array>
+			</dict>
+		</dict>
+
+		<!-- CommonJS (.cjs) — no system type exists -->
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.cjs</string>
+			<key>UTTypeDescription</key>
+			<string>CommonJS Module</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>cjs</string>
+				</array>
+			</dict>
+		</dict>
+
+		<!-- EditorConfig (.editorconfig) — no system type exists -->
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.editorconfig</string>
+			<key>UTTypeDescription</key>
+			<string>EditorConfig</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>editorconfig</string>
+				</array>
+			</dict>
+		</dict>
+
+		<!-- Elm (.elm) — no system type exists -->
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.elm</string>
+			<key>UTTypeDescription</key>
+			<string>Elm Source</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>elm</string>
+				</array>
+			</dict>
+		</dict>
+
+		<!-- Dotenv (.env) — no system type exists -->
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.dotenv</string>
+			<key>UTTypeDescription</key>
+			<string>Environment Variables File</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>env</string>
+				</array>
+			</dict>
+		</dict>
+
+		<!-- Erlang (.erl) — no system type exists -->
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.erlang</string>
+			<key>UTTypeDescription</key>
+			<string>Erlang Source</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>erl</string>
+				</array>
+			</dict>
+		</dict>
+
+		<!-- Fish shell (.fish) — no system type exists -->
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.fish</string>
+			<key>UTTypeDescription</key>
+			<string>Fish Shell Script</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.shell-script</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>fish</string>
+				</array>
+			</dict>
+		</dict>
+
+		<!-- Groovy / Gradle (.groovy, .gradle) — no system type exists -->
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.groovy</string>
+			<key>UTTypeDescription</key>
+			<string>Groovy Source</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>groovy</string>
+					<string>gradle</string>
+				</array>
+			</dict>
+		</dict>
+
+		<!-- INI (.ini) — no system type exists -->
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.ini</string>
+			<key>UTTypeDescription</key>
+			<string>INI Configuration File</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>ini</string>
+				</array>
+			</dict>
+		</dict>
+
+		<!-- JSON with Comments (.jsonc) — no system type exists -->
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.jsonc</string>
+			<key>UTTypeDescription</key>
+			<string>JSON with Comments</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>jsonc</string>
+				</array>
+			</dict>
+		</dict>
+
+		<!-- PowerShell (.ps1) — no system type exists -->
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.powershell</string>
+			<key>UTTypeDescription</key>
+			<string>PowerShell Script</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>ps1</string>
+				</array>
+			</dict>
+		</dict>
+
+		<!-- Visual Basic (.vb) — no system type exists -->
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.vb</string>
+			<key>UTTypeDescription</key>
+			<string>Visual Basic Source</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>vb</string>
+				</array>
+			</dict>
+		</dict>
+
+		<!-- Vimscript (.vim) — no system type exists -->
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.vim</string>
+			<key>UTTypeDescription</key>
+			<string>Vimscript</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>vim</string>
 				</array>
 			</dict>
 		</dict>
