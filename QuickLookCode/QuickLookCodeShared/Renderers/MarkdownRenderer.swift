@@ -60,8 +60,11 @@ public enum MarkdownRenderer {
             throw RendererError.cssNotFound
         }
 
-        // 6. Assemble final document
-        let html = assembleHTML(body: resolvedHTML, css: css, fileName: fileName)
+        // 6. Generate syntax-highlighted source view
+        let sourceHTML = await generateSourceHTML(markdown: markdown, theme: theme, ide: ide)
+
+        // 7. Assemble final document
+        let html = assembleHTML(body: resolvedHTML, sourceHTML: sourceHTML, css: css, fileName: fileName)
         return Data(html.utf8)
     }
 }
@@ -237,6 +240,37 @@ private extension MarkdownRenderer {
         """
     }
 
+    /// Renders the raw markdown source as a syntax-highlighted `<pre>` block,
+    /// used for the Source tab in the toolbar toggle.
+    static func generateSourceHTML(markdown: String, theme: ThemeData, ide: IDEInfo) async -> String {
+        let plainFallback = "<pre style=\"background:\(theme.background);color:\(theme.foreground)\">"
+            + "<code>\(escapeHTML(markdown))</code></pre>"
+
+        guard let langInfo = FileTypeRegistry.language(forExtension: "md") else { return plainFallback }
+
+        let grammarLoader = GrammarLoader(ide: ide)
+        guard let grammarData = try? grammarLoader.grammarData(for: langInfo.grammarSearch) else { return plainFallback }
+        guard let rawLines = try? SourceCodeRenderer.tokenize(code: markdown, grammarData: grammarData, theme: theme) else { return plainFallback }
+
+        let codeHTML = rawLines.map { line in
+            let content = line.map { token -> String in
+                let escaped = escapeHTML(token.text)
+                var styles: [String] = []
+                if let c = token.color     { styles.append("color:\(c)") }
+                if token.fontStyle?.contains("bold") == true      { styles.append("font-weight:bold") }
+                if token.fontStyle?.contains("italic") == true    { styles.append("font-style:italic") }
+                if token.fontStyle?.contains("underline") == true { styles.append("text-decoration:underline") }
+                guard !styles.isEmpty else { return escaped }
+                return "<span style=\"\(styles.joined(separator: ";"))\">\(escaped)</span>"
+            }.joined()
+            return "<span class=\"line\">\(content)</span>"
+        }.joined()
+
+        return """
+        <pre style="background:\(theme.background);color:\(theme.foreground);margin:0;padding:16px 20px;font-family:ui-monospace,'SF Mono',Menlo,Monaco,Consolas,'Courier New',monospace;font-size:13px;line-height:1.6"><code style="display:block">\(codeHTML)</code></pre>
+        """
+    }
+
     static func makePlainBlock(code: String, lang: String, theme: ThemeData) -> String {
         let escaped = escapeHTML(code)
         let classAttr = lang.isEmpty ? "" : " class=\"language-\(lang)\""
@@ -322,7 +356,7 @@ private extension MarkdownRenderer {
 
 private extension MarkdownRenderer {
 
-    static func assembleHTML(body: String, css: String, fileName: String) -> String {
+    static func assembleHTML(body: String, sourceHTML: String, css: String, fileName: String) -> String {
         let escapedTitle = fileName
             .replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")
@@ -335,12 +369,23 @@ private extension MarkdownRenderer {
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>\(escapedTitle)</title>
         <style>
+        \(ToolbarRenderer.css)
         \(css)
+        .line { display: block; min-height: 1.6em; white-space: pre; }
         </style>
         </head>
         <body>
-        <div class="markdown-body">
-        \(body)
+        \(ToolbarRenderer.toggleInputsHTML)
+        \(ToolbarRenderer.html(showPreviewToggle: true))
+        <div id="ql-content">
+          <div id="ql-view-preview">
+            <div class="markdown-body">
+            \(body)
+            </div>
+          </div>
+          <div id="ql-view-code">
+          \(sourceHTML)
+          </div>
         </div>
         </body>
         </html>

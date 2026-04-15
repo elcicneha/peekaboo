@@ -98,21 +98,21 @@ public enum HTMLRenderer {
         <title>\(escapeHTML(fileName)) — \(escapeHTML(languageDisplayName))</title>
         <style>
         *, *::before, *::after { box-sizing: border-box; }
-        html, body {
-            margin: 0;
-            padding: 0;
-            background: \(bg);
-            color: \(fg);
-        }
+        \(ToolbarRenderer.css)
         body {
             font-family: \(font);
             font-size: \(fontSize)px;
             line-height: 1.6;
+            background: \(bg);
+            color: \(fg);
+        }
+        #ql-content {
+            background: \(bg);
+            color: \(fg);
         }
         pre {
             margin: 0;
             padding: 16px 20px;
-            overflow: auto;
             tab-size: 4;
             -moz-tab-size: 4;
         }
@@ -130,7 +130,10 @@ public enum HTMLRenderer {
         </style>
         </head>
         <body>
+        \(ToolbarRenderer.html(showPreviewToggle: false))
+        <div id="ql-content">
         <pre><code>\(codeHTML)</code></pre>
+        </div>
         </body>
         </html>
         """

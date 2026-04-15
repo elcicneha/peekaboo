@@ -151,6 +151,8 @@ public enum FileTypeRegistry {
         "jade":         .init(grammarSearch: "pug",          displayName: "Pug (Jade)"),
 
         // Markup / Docs
+        "md":       .init(grammarSearch: "markdown",         displayName: "Markdown"),
+        "markdown": .init(grammarSearch: "markdown",         displayName: "Markdown"),
         "tex":      .init(grammarSearch: "latex",            displayName: "LaTeX"),
         "latex":    .init(grammarSearch: "latex",            displayName: "LaTeX"),
         "sty":      .init(grammarSearch: "latex",            displayName: "LaTeX Style"),
