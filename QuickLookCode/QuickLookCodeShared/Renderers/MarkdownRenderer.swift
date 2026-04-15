@@ -376,7 +376,8 @@ private extension MarkdownRenderer {
         </head>
         <body>
         \(ToolbarRenderer.toggleInputsHTML)
-        \(ToolbarRenderer.html(showPreviewToggle: true))
+        \(ToolbarRenderer.wordWrapCheckboxHTML)
+        \(ToolbarRenderer.html(showPreviewToggle: true, showWordWrapToggle: true))
         <div id="ql-content">
           <div id="ql-view-preview">
             <div class="markdown-body">

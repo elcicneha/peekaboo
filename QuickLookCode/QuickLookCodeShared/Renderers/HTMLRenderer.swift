@@ -58,11 +58,13 @@ public enum HTMLRenderer {
         // Build all <span class="line">…</span> blocks
         var lineBlocks: [String] = lines.enumerated().map { (index, spans) in
             let content = spans.map { spanHTML($0) }.joined()
+            let indent = leadingIndentWidth(spans)
+            let indentStyle = indent > 0 ? " style=\"--line-indent:\(indent)ch\"" : ""
             if showLineNumbers {
                 let num = index + 1
-                return "<span class=\"line\"><span class=\"ln\" aria-hidden=\"true\">\(num)</span>\(content)</span>"
+                return "<span class=\"line\"\(indentStyle)><span class=\"ln\" aria-hidden=\"true\">\(num)</span>\(content)</span>"
             }
-            return "<span class=\"line\">\(content)</span>"
+            return "<span class=\"line\"\(indentStyle)>\(content)</span>"
         }
 
         if let note = truncationNote {
@@ -130,7 +132,8 @@ public enum HTMLRenderer {
         </style>
         </head>
         <body>
-        \(ToolbarRenderer.html(showPreviewToggle: false))
+        \(ToolbarRenderer.wordWrapCheckboxHTML)
+        \(ToolbarRenderer.html(showPreviewToggle: false, showWordWrapToggle: true))
         <div id="ql-content">
         <pre><code>\(codeHTML)</code></pre>
         </div>
@@ -140,6 +143,22 @@ public enum HTMLRenderer {
     }
 
     // MARK: - Helpers
+
+    /// Counts the visual width of leading whitespace in character units (ch).
+    /// Spaces = 1ch each, tabs = 4ch each (matching `tab-size: 4` in CSS).
+    private static func leadingIndentWidth(_ spans: [TokenSpan]) -> Int {
+        var width = 0
+        outer: for span in spans {
+            for ch in span.text {
+                switch ch {
+                case " ":  width += 1
+                case "\t": width += 4
+                default:   break outer
+                }
+            }
+        }
+        return width
+    }
 
     private static func spanHTML(_ span: TokenSpan) -> String {
         let escaped = escapeHTML(span.text)
