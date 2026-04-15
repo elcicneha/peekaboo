@@ -20,6 +20,12 @@ public enum FileTypeRegistry {
         registry[ext.lowercased()]
     }
 
+    /// All unique grammar search terms across all registered file types.
+    /// Used by CacheManager to pre-index grammar file locations.
+    public static var allGrammarSearchTerms: Set<String> {
+        Set(registry.values.map { $0.grammarSearch })
+    }
+
     // MARK: - Registry
 
     private static let registry: [String: LanguageInfo] = [

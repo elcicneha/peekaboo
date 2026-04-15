@@ -9,11 +9,25 @@ import QuickLookCodeShared
 struct ContentView: View {
 
     @State private var status: StatusInfo = .loading
+    @State private var lastRefreshed: Date? = nil
+    @State private var isRefreshing = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("QuickLookCode", systemImage: "doc.text.magnifyingglass")
-                .font(.title2.bold())
+            HStack {
+                Label("QuickLookCode", systemImage: "doc.text.magnifyingglass")
+                    .font(.title2.bold())
+                Spacer()
+                Button(action: refresh) {
+                    if isRefreshing {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                }
+                .disabled(isRefreshing)
+                .help("Reload IDE, theme, and grammar caches. Use after changing your theme in the IDE.")
+            }
 
             Divider()
 
@@ -49,6 +63,13 @@ struct ContentView: View {
                 Label("Could not load theme: \(error)", systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.orange)
             }
+
+            if let date = lastRefreshed {
+                Divider()
+                Text("Cache last refreshed \(date.formatted(.relative(presentation: .named)))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding()
         .frame(minWidth: 360, minHeight: 180)
@@ -58,6 +79,13 @@ struct ContentView: View {
     // MARK: - Loading
 
     private func loadStatus() async {
+        // Bootstrap the cache (builds it if missing; no-op if already current).
+        await Task.detached(priority: .userInitiated) {
+            _ = CacheManager.bootstrap()
+        }.value
+
+        lastRefreshed = CacheManager.lastBuiltAt
+
         guard let ide = IDELocator.preferred else {
             status = .noIDE
             return
@@ -73,6 +101,20 @@ struct ContentView: View {
             ))
         } catch {
             status = .themeError(ideName: ide.name, error: error.localizedDescription)
+        }
+    }
+
+    private func refresh() {
+        isRefreshing = true
+        status = .loading
+        Task {
+            // Rebuild runs on a background thread; state updates stay on MainActor.
+            await Task.detached(priority: .userInitiated) {
+                CacheManager.refresh()
+            }.value
+            isRefreshing = false
+            lastRefreshed = CacheManager.lastBuiltAt
+            await loadStatus()
         }
     }
 

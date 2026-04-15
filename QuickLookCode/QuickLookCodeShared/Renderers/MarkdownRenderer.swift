@@ -208,9 +208,10 @@ private extension MarkdownRenderer {
             grammarData = data
         }
 
-        // Tokenize
-        guard let rawLines = try? SourceCodeRenderer.tokenize(
+        // Tokenize via shared TokenizerEngine (reuses warm JSContext)
+        guard let rawLines = try? await SourceCodeRenderer.tokenize(
             code: code,
+            language: langInfo.grammarSearch,
             grammarData: grammarData,
             theme: theme
         ) else { return plainFallback }
@@ -250,7 +251,12 @@ private extension MarkdownRenderer {
 
         let grammarLoader = GrammarLoader(ide: ide)
         guard let grammarData = try? grammarLoader.grammarData(for: langInfo.grammarSearch) else { return plainFallback }
-        guard let rawLines = try? SourceCodeRenderer.tokenize(code: markdown, grammarData: grammarData, theme: theme) else { return plainFallback }
+        guard let rawLines = try? await SourceCodeRenderer.tokenize(
+            code: markdown,
+            language: langInfo.grammarSearch,
+            grammarData: grammarData,
+            theme: theme
+        ) else { return plainFallback }
 
         let codeHTML = rawLines.map { line in
             let content = line.map { token -> String in

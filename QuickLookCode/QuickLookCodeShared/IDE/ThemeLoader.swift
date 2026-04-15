@@ -25,6 +25,14 @@ public struct TokenColorRule {
 
 public enum ThemeLoader {
 
+    // MARK: - In-memory caches (process lifetime, populated by CacheManager)
+
+    /// Parsed theme data; skips all disk I/O on the hot path when set.
+    static var _cachedTheme: ThemeData?
+
+    /// Pre-serialized IRawTheme JSON string ready to hand directly to initGrammar.
+    static var _cachedSerializedTheme: String?
+
     public enum LoadError: LocalizedError {
         case settingsNotFound
         case noThemeKey
@@ -47,9 +55,15 @@ public enum ThemeLoader {
     // MARK: - Public API
 
     /// Load the active theme for the given IDE.
-    /// If the configured theme can't be found (e.g. older VS Code, user-installed extension),
-    /// falls back to the first theme file found in the built-in extensions.
+    /// Returns the in-memory cached theme if CacheManager has bootstrapped; otherwise
+    /// does a full disk load (find settings.json → locate theme file → parse JSON).
     public static func loadActiveTheme(from ide: IDEInfo) throws -> ThemeData {
+        if let cached = _cachedTheme { return cached }
+        return try loadActiveThemeFromDisk(from: ide)
+    }
+
+    /// Full disk load — always reads from the filesystem. Used by CacheManager at build time.
+    static func loadActiveThemeFromDisk(from ide: IDEInfo) throws -> ThemeData {
         let themeName = readActiveThemeName(settingsURL: ide.settingsURL)
 
         // Try the user's configured (or default) theme first.
@@ -69,7 +83,7 @@ public enum ThemeLoader {
 
     // MARK: - Steps
 
-    private static func readActiveThemeName(settingsURL: URL) -> String {
+    static func readActiveThemeName(settingsURL: URL) -> String {
         guard
             FileManager.default.fileExists(atPath: settingsURL.path),
             let data = try? Data(contentsOf: settingsURL),
@@ -83,7 +97,7 @@ public enum ThemeLoader {
         return theme
     }
 
-    private static func findThemeFile(named themeName: String, in ide: IDEInfo) throws -> URL {
+    static func findThemeFile(named themeName: String, in ide: IDEInfo) throws -> URL {
         let searchRoots = [ide.builtinExtensionsURL, ide.userExtensionsURL]
         for root in searchRoots {
             if let url = searchThemes(in: root, matching: themeName) {

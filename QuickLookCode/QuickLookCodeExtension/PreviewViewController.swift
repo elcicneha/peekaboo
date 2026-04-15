@@ -19,7 +19,12 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         container.layer?.cornerRadius = 6
         container.layer?.masksToBounds = true
 
-        webView = WKWebView(frame: container.bounds, configuration: WKWebViewConfiguration())
+        // Reuse the shared web content process across all preview instances to avoid
+        // the ~100–200 ms cold-start cost of spawning a fresh process each time.
+        let config = WKWebViewConfiguration()
+        config.processPool = SharedWebProcessPool.shared
+
+        webView = WKWebView(frame: container.bounds, configuration: config)
         webView.autoresizingMask = [.width, .height]
         webView.wantsLayer = true
         webView.layer?.cornerRadius = 6
@@ -37,6 +42,9 @@ class PreviewViewController: NSViewController, QLPreviewingController {
     }
 
     func preparePreviewOfFile(at url: URL) async throws {
+        // Ensure the cache is populated before rendering. No-op after the first call.
+        CacheManager.bootstrap()
+
         let html = await renderHTML(fileURL: url, fileName: url.lastPathComponent, ext: url.pathExtension)
         await MainActor.run {
             pendingHTML = html

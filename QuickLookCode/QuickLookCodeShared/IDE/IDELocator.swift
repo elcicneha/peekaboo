@@ -35,6 +35,11 @@ public enum IDELocator {
         ),
     ]
 
+    // MARK: - In-memory cache (process lifetime)
+
+    /// Set by CacheManager.bootstrap(); avoids filesystem scans on the hot path.
+    static var _cached: IDEInfo?
+
     // MARK: - Public API
 
     /// Returns all IDEs found on the system, in catalog order.
@@ -75,8 +80,10 @@ public enum IDELocator {
     }
 
     /// The first (preferred) installed IDE, or nil if none found.
+    /// Returns the in-memory cached value if CacheManager has bootstrapped; falls back
+    /// to a live filesystem scan otherwise.
     public static var preferred: IDEInfo? {
-        installedIDEs().first
+        _cached ?? installedIDEs().first
     }
 
     // MARK: - Helpers

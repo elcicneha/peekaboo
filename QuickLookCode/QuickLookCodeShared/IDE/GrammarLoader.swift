@@ -7,9 +7,34 @@ import Foundation
 /// Locates and caches TextMate grammar files from an IDE installation.
 public final class GrammarLoader {
 
+    // MARK: - Process-lifetime static caches
+    // Survive instance recreation; populated by CacheManager from the grammar index.
+
+    private static var _urlCache: [String: URL] = [:]      // grammarSearch → file URL
+    private static var _dataCache: [String: Data] = [:]    // grammarSearch → grammar Data
+    private static var _siblingCache: [String: [Data]] = [:] // grammarSearch → sibling Data[]
+    private static let _lock = NSLock()
+
+    /// Seeds the URL cache from the on-disk grammar index (called by CacheManager).
+    public static func seedURLIndex(_ index: [String: URL]) {
+        _lock.lock()
+        _urlCache = index
+        _lock.unlock()
+    }
+
+    /// Drops all static caches (called by CacheManager.refresh()).
+    public static func invalidateStaticCaches() {
+        _lock.lock()
+        _urlCache.removeAll()
+        _dataCache.removeAll()
+        _siblingCache.removeAll()
+        _lock.unlock()
+    }
+
+    // MARK: - Instance state
+
     private let ide: IDEInfo
-    private var cache: [String: URL] = [:]
-    private var siblingCache: [String: [Data]] = [:]
+    private var instanceURLCache: [String: URL] = [:]  // fallback for languages not in static index
 
     public init(ide: IDEInfo) {
         self.ide = ide
@@ -18,20 +43,51 @@ public final class GrammarLoader {
     // MARK: - Public API
 
     public func grammarData(for language: String) throws -> Data? {
-        if let url = cache[language] {
-            return try Data(contentsOf: url)
+        // 1. Static data cache (hot path)
+        GrammarLoader._lock.lock()
+        if let data = GrammarLoader._dataCache[language] {
+            GrammarLoader._lock.unlock()
+            return data
         }
-        guard let url = findGrammarFile(for: language) else {
-            return nil
+        let staticURL = GrammarLoader._urlCache[language]
+        GrammarLoader._lock.unlock()
+
+        // 2. Resolve URL (static index → instance cache → directory walk)
+        let resolvedURL: URL
+        if let url = staticURL {
+            resolvedURL = url
+        } else if let url = instanceURLCache[language] {
+            resolvedURL = url
+        } else {
+            guard let url = findGrammarFile(for: language) else { return nil }
+            resolvedURL = url
+            instanceURLCache[language] = url
+            GrammarLoader._lock.lock()
+            GrammarLoader._urlCache[language] = url
+            GrammarLoader._lock.unlock()
         }
-        cache[language] = url
-        return try Data(contentsOf: url)
+
+        // 3. Read and cache the data
+        let data = try Data(contentsOf: resolvedURL)
+        GrammarLoader._lock.lock()
+        GrammarLoader._dataCache[language] = data
+        GrammarLoader._lock.unlock()
+        return data
     }
 
     public func grammarURL(for language: String) -> URL? {
-        if let cached = cache[language] { return cached }
-        let url = findGrammarFile(for: language)
-        if let url { cache[language] = url }
+        GrammarLoader._lock.lock()
+        let staticURL = GrammarLoader._urlCache[language]
+        GrammarLoader._lock.unlock()
+
+        if let url = staticURL { return url }
+        if let url = instanceURLCache[language] { return url }
+
+        guard let url = findGrammarFile(for: language) else { return nil }
+        instanceURLCache[language] = url
+        GrammarLoader._lock.lock()
+        GrammarLoader._urlCache[language] = url
+        GrammarLoader._lock.unlock()
         return url
     }
 
@@ -39,7 +95,13 @@ public final class GrammarLoader {
     /// as the resolved grammar for `language` (excluding the main file itself).
     /// These are used to satisfy cross-grammar `include` references (e.g. yaml-embedded).
     public func siblingGrammarData(for language: String) -> [Data] {
-        if let cached = siblingCache[language] { return cached }
+        GrammarLoader._lock.lock()
+        if let cached = GrammarLoader._siblingCache[language] {
+            GrammarLoader._lock.unlock()
+            return cached
+        }
+        GrammarLoader._lock.unlock()
+
         guard let mainURL = grammarURL(for: language) else { return [] }
         let syntaxDir = mainURL.deletingLastPathComponent()
         let fm = FileManager.default
@@ -52,7 +114,10 @@ public final class GrammarLoader {
             guard url.pathExtension == "json", url != mainURL else { return nil }
             return try? Data(contentsOf: url)
         }
-        siblingCache[language] = result
+
+        GrammarLoader._lock.lock()
+        GrammarLoader._siblingCache[language] = result
+        GrammarLoader._lock.unlock()
         return result
     }
 

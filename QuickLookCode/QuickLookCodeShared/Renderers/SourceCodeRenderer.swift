@@ -2,23 +2,15 @@
 //  SourceCodeRenderer.swift
 //  QuickLookCodeShared
 //
-//  Tokenizes source code via vscode-textmate running inside a JavaScriptCore
-//  context, then builds a syntax-highlighted HTML page using the active VS Code theme.
+//  Tokenizes source code via vscode-textmate (running inside a shared TokenizerEngine
+//  actor), then builds a syntax-highlighted HTML page using the active VS Code/Antigravity theme.
 //
-//  JavaScriptCore (JSC) is used instead of WKWebView because:
-//    • JSC runs in-process — no child process spawning, works in sandboxed extensions.
-//    • The tokenizer-jsc.js bundle uses native JS regex (no WASM), so initialization
-//      is fully synchronous.
-//    • JSC automatically drains the microtask queue after each API call, which lets
-//      us use vscode-textmate's Promise-based API without an async event loop.
-//
-//  Color resolution happens inside vscode-textmate via `tokenizeLine2` + the registry's
-//  color map, so scope→color matching (descendant/parent/exclusion selectors,
-//  specificity scoring) is handled by the library — identical to VS Code.
+//  The JSContext is created once per process inside TokenizerEngine.shared. This file is
+//  responsible only for reading the source file, delegating tokenization, and building HTML.
 //
 
 import Foundation
-import JavaScriptCore
+import JavaScriptCore  // needed for JSValue in parseResult
 
 // MARK: - Public API
 
@@ -50,7 +42,6 @@ public enum SourceCodeRenderer {
     // MARK: Entry point
 
     /// Renders `fileURL` as a syntax-highlighted HTML page.
-    /// Safe to call from any thread — JSC is used in-process.
     public static func render(
         fileURL: URL,
         grammarData: Data,
@@ -61,7 +52,13 @@ public enum SourceCodeRenderer {
     ) async throws -> Data {
         let (content, truncationNote) = readFile(at: fileURL)
 
-        let rawLines = try tokenize(code: content, grammarData: grammarData, siblingGrammars: siblingGrammars, theme: theme)
+        let rawLines = try await tokenize(
+            code: content,
+            language: languageInfo.grammarSearch,
+            grammarData: grammarData,
+            siblingGrammars: siblingGrammars,
+            theme: theme
+        )
 
         let spanLines: [[HTMLRenderer.TokenSpan]] = rawLines.map { line in
             line.map { raw in
@@ -120,78 +117,44 @@ public enum SourceCodeRenderer {
         return (content, nil)
     }
 
-    // MARK: - JSC tokenization
+    // MARK: - Tokenization (via shared TokenizerEngine)
 
-    static func tokenize(code: String, grammarData: Data, siblingGrammars: [Data] = [], theme: ThemeData) throws -> [[RawToken]] {
+    /// Tokenizes `code` using the shared JSContext. Async because it awaits the actor.
+    /// The `language` key is used to detect grammar changes between calls so the engine
+    /// can skip re-initializing when the same language is tokenized twice in a row.
+    static func tokenize(
+        code: String,
+        language: String,
+        grammarData: Data,
+        siblingGrammars: [Data] = [],
+        theme: ThemeData
+    ) async throws -> [[RawToken]] {
         guard let grammarJSON = String(data: grammarData, encoding: .utf8) else {
             throw RendererError.grammarNotUTF8
         }
 
-        let themeJSON = try serializeTheme(theme)
-
-        let bundle = Bundle(for: BundleAnchor.self)
-        guard let bundleURL = bundle.url(forResource: "tokenizer-jsc", withExtension: "js") else {
-            throw RendererError.resourceNotFound(
-                "tokenizer-jsc.js not found in QuickLookCodeShared.framework — run `pnpm run build` in tokenizer/"
-            )
+        // Use pre-serialized theme JSON from cache if available; otherwise build it now.
+        let themeJSON: String
+        if let cached = ThemeLoader._cachedSerializedTheme {
+            themeJSON = cached
+        } else {
+            themeJSON = try serializeTheme(theme)
         }
 
-        let bundleScript: String
-        do {
-            bundleScript = try String(contentsOf: bundleURL, encoding: .utf8)
-        } catch {
-            throw RendererError.resourceNotFound("Could not read tokenizer-jsc.js: \(error.localizedDescription)")
-        }
-
-        let context = JSContext()!
-        context.exceptionHandler = { _, exception in
-            guard let msg = exception?.toString() else { return }
-            NSLog("[QuickLookCode] JSC exception: %@", msg)
-        }
-
-        // Bridge console.error → NSLog so JS diagnostics appear in the system log.
-        let nslogBlock: @convention(block) (String) -> Void = { msg in
-            NSLog("[QuickLookCode] JS: %@", msg)
-        }
-        context.setObject(nslogBlock, forKeyedSubscript: "__nslog" as NSString)
-        context.evaluateScript(
-            "console.error = function() { try { __nslog(Array.prototype.slice.call(arguments).join(' ')); } catch(e) {} };"
-        )
-
-        // JSC has no `window`; shim it to globalThis so the iife bundle works.
-        context.evaluateScript("var window = globalThis;")
-
-        // Install native oniguruma as `globalThis.onigLib` BEFORE loading the
-        // bundle — vscode-textmate picks it up from there. Native oniguruma
-        // replaces the previous JS regex approximation entirely.
-        OnigJSBridge.install(in: context)
-
-        // Load the vscode-textmate bundle.
-        context.evaluateScript(bundleScript)
-
-        // Step 1 — init grammar + theme.
-        // After this call, JSC drains its microtask queue automatically, so
-        // _grammar is set before doTokenize runs.
         let siblingJSONStrings = siblingGrammars.compactMap { String(data: $0, encoding: .utf8) }
         let siblingGrammarsJSON = (try? JSONSerialization.data(withJSONObject: siblingJSONStrings))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-        let initFn = context.objectForKeyedSubscript("initGrammar")
-        initFn?.call(withArguments: [grammarJSON, themeJSON, siblingGrammarsJSON])
 
-        // Step 2 — tokenize. Returns Array<Array<{text, color, fontStyle}>> or null.
-        let tokenizeFn = context.objectForKeyedSubscript("doTokenize")
-        let result = tokenizeFn?.call(withArguments: [code])
-
-        guard let result, !result.isNull, !result.isUndefined else {
-            throw RendererError.tokenizationFailed(
-                "doTokenize returned null — grammar may not have loaded (check grammar JSON)"
-            )
-        }
-
-        return parseResult(result)
+        return await TokenizerEngine.shared.tokenize(
+            code: code,
+            language: language,
+            grammarJSON: grammarJSON,
+            siblingGrammarsJSON: siblingGrammarsJSON,
+            themeJSON: themeJSON
+        )
     }
 
-    private static func parseResult(_ value: JSValue) -> [[RawToken]] {
+    static func parseResult(_ value: JSValue) -> [[RawToken]] {
         guard let lines = value.toArray() else { return [] }
         return lines.compactMap { lineAny -> [RawToken]? in
             guard let line = lineAny as? [Any] else { return [] }
@@ -214,7 +177,7 @@ public enum SourceCodeRenderer {
     /// The first settings entry carries the theme's default foreground/background so
     /// tokens with no matching rule still get the correct default. Remaining entries
     /// mirror the theme's `tokenColors` array one-for-one.
-    private static func serializeTheme(_ theme: ThemeData) throws -> String {
+    static func serializeTheme(_ theme: ThemeData) throws -> String {
         var settings: [[String: Any]] = []
 
         settings.append([
