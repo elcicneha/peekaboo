@@ -210,6 +210,14 @@ public enum ToolbarRenderer {
                 border-color: rgba(0, 122, 255, 0.4);
             }
         }
+
+        /* ── Narrow viewport (Column View preview pane) ───────────────── */
+        /* Shrink everything uniformly and drop the toolbar. Layout reflows
+           at the zoomed scale, so wrapping and flex still work. */
+        @media (max-width: 480px) {
+            html { zoom: 0.5; }
+            #ql-toolbar { display: none; }
+        }
         """
 
     // MARK: - HTML
