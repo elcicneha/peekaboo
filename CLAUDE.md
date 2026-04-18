@@ -35,7 +35,26 @@ log stream --predicate 'subsystem contains "quicklookcode"' --level debug
 # Rebuild the JS tokenizer bundle (after editing tokenizer/src/tokenizer-jsc.js)
 cd tokenizer && pnpm run build
 # Output goes directly to QuickLookCode/QuickLookCodeShared/Resources/tokenizer-jsc.js
+
+# Produce a distributable zip (Release build) for non-Developer-ID distribution
+./scripts/package.sh                    # uses MARKETING_VERSION from project.pbxproj
+./scripts/package.sh 1.2.0              # or override the version in the zip filename
+# Output: dist/QuickLookCode-v<VERSION>.zip
 ```
+
+## Distribution
+
+There is **no paid Apple Developer account**. The app is signed by Xcode with the Personal Team (`DEVELOPMENT_TEAM = 97S4Q992W3`, automatic signing) and is **not notarized**. Do not try to add notarization steps — there is no Developer ID Application certificate available.
+
+`scripts/package.sh` uses `xcodebuild archive` (not `build`) because `archive` has a stricter build graph that respects the cross-target Swift module dependency. Do not change it back to `build`.
+
+**Ad-hoc re-sign step (critical)**: after `archive`, the script strips `embedded.provisionprofile` from the app and extension, then re-signs every bundle with `codesign -s -` (ad-hoc). Reason: the Personal Team embeds a development provisioning profile whose `ProvisionedDevices` list contains only the developer's Mac. On any other Mac the kernel refuses to launch with "QuickLookCode cannot be opened because of a problem". Ad-hoc signing has no team and no device list, so the binary runs anywhere.
+
+The re-sign also strips the team-scoped entitlements: `com.apple.security.application-groups`, `com.apple.developer.team-identifier`, `com.apple.application-identifier`. These cannot be used with an ad-hoc signature — a sandboxed app with an `application-groups` entitlement but no matching team will fail to launch. Practical consequence: `CacheManager`'s L3 disk cache (shared group container) is unreachable on end-users' machines; L2 in-memory and L1 per-render layers still function. Do not try to keep the App Group — it will re-break distribution.
+
+End-user install requires stripping the quarantine xattr — see the four-line Terminal block in `README.md`. This is the full install story; do not add installer scripts or DMG packaging without a specific reason (previously considered and rejected — DMG adds signing complications with zero UX benefit when there's no notarization).
+
+To bump a release: edit `MARKETING_VERSION` in `project.pbxproj` → run `scripts/package.sh` → upload the resulting zip.
 
 ## Architecture
 
@@ -44,6 +63,8 @@ Three Xcode targets, all in `QuickLookCode/QuickLookCode.xcodeproj`:
 - **QuickLookCode** — host macOS app (required by macOS to ship an extension). Minimal SwiftUI UI showing IDE detection status and active theme.
 - **QuickLookCodeExtension** — the actual Quick Look preview extension (view-based `QLPreviewingController`). Entry point: `PreviewViewController.swift` — hosts a sandboxed `WKWebView` and calls `webView.loadHTMLString(...)` with the rendered HTML. Routes files through the full render pipeline; falls back to plain text on any failure.
 - **QuickLookCodeShared** — framework linked into both targets above. Contains all IDE integration logic.
+
+**Target dependencies**: `QuickLookCodeExtension` has an explicit `PBXTargetDependency` on `QuickLookCodeShared` even though it does not link the framework (the host app embeds it, resolved at runtime via `@rpath`). The dependency exists purely to force build ordering — without it, `xcodebuild archive` races and the extension's Swift compile can't find the shared module. Xcode GUI masks this via implicit inference, but CLI builds break. Do not remove this dependency.
 
 ### Renderer Routing
 

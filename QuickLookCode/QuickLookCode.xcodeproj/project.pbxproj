@@ -28,6 +28,13 @@
 			remoteGlobalIDString = 8217C2B02F8E24E00014ACC7;
 			remoteInfo = QuickLookCodeShared;
 		};
+		8217C2C02F8E24E00014ACC7 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 8217C27B2F8E24110014ACC7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8217C2B02F8E24E00014ACC7;
+			remoteInfo = QuickLookCodeShared;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -199,6 +206,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				8217C2C12F8E24E00014ACC7 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				8217C29A2F8E24A50014ACC7 /* QuickLookCodeExtension */,
@@ -333,6 +341,11 @@
 			isa = PBXTargetDependency;
 			target = 8217C2B02F8E24E00014ACC7 /* QuickLookCodeShared */;
 			targetProxy = 8217C2B72F8E24E00014ACC7 /* PBXContainerItemProxy */;
+		};
+		8217C2C12F8E24E00014ACC7 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8217C2B02F8E24E00014ACC7 /* QuickLookCodeShared */;
+			targetProxy = 8217C2C02F8E24E00014ACC7 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 

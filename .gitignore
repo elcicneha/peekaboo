@@ -1,0 +1,17 @@
+# Packaging
+build/
+dist/
+
+# Xcode
+*.xcuserdatad/
+xcuserdata/
+DerivedData/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+
+# macOS
+.DS_Store
+
+# Tokenizer (Node)
+tokenizer/node_modules/
