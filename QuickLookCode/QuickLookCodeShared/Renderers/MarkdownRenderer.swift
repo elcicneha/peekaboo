@@ -43,8 +43,15 @@ public enum MarkdownRenderer {
             throw RendererError.fileUnreadable
         }
 
-        // 2. Parse → HTML via cmark-gfm
-        let rawHTML = parseGFM(markdown)
+        // 2. Strip leading YAML/TOML/JSON front matter before parsing.
+        // cmark-gfm has no front-matter extension; without stripping, a `---`
+        // delimited block at the top renders as `<hr>` + a heading. The source
+        // view below still receives the original markdown so the raw file
+        // (including front matter) shows under the Code tab.
+        let body = stripFrontMatter(markdown)
+
+        // 3. Parse → HTML via cmark-gfm
+        let rawHTML = parseGFM(body)
 
         // 3. Highlight fenced code blocks with VS Code theme
         let highlightedHTML = await highlightCodeBlocks(in: rawHTML, theme: theme, ide: ide)
@@ -90,6 +97,27 @@ private extension MarkdownRenderer {
 
         return String(data: rawData, encoding: .utf8)
             ?? String(data: rawData, encoding: .isoLatin1)
+    }
+
+    /// Strips a leading YAML (`---`), TOML (`+++`), or JSON (`;;;`) front
+    /// matter block if one is present, matching the Jekyll/Hugo/Astro
+    /// convention: the file must start with the delimiter on its own line,
+    /// and a matching closing delimiter must appear on its own line later.
+    /// If either condition fails, the input is returned unchanged so a
+    /// legitimate leading `<hr>` still renders.
+    static func stripFrontMatter(_ markdown: String) -> String {
+        let delim: String
+        if      markdown.hasPrefix("---\n") { delim = "---" }
+        else if markdown.hasPrefix("+++\n") { delim = "+++" }
+        else if markdown.hasPrefix(";;;\n") { delim = ";;;" }
+        else { return markdown }
+
+        let afterOpen = markdown.index(markdown.startIndex, offsetBy: 4)
+        let closing = "\n\(delim)\n"
+        guard let range = markdown.range(of: closing, range: afterOpen..<markdown.endIndex) else {
+            return markdown
+        }
+        return String(markdown[range.upperBound...])
     }
 }
 
