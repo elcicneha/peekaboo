@@ -53,8 +53,12 @@ public enum MarkdownRenderer {
         // 3. Parse → HTML via cmark-gfm
         let rawHTML = parseGFM(body)
 
-        // 3. Highlight fenced code blocks with VS Code theme
-        let highlightedHTML = await highlightCodeBlocks(in: rawHTML, theme: theme, ide: ide)
+        // 3a. Inject id="slug" on every heading so in-document [..](#anchor)
+        // links resolve. cmark-gfm doesn't do this itself.
+        let anchoredHTML = addHeadingAnchors(in: rawHTML)
+
+        // 4. Highlight fenced code blocks with VS Code theme
+        let highlightedHTML = await highlightCodeBlocks(in: anchoredHTML, theme: theme, ide: ide)
 
         // 4. Resolve relative images → data URIs
         let resolvedHTML = resolveImages(in: highlightedHTML, baseURL: fileURL.deletingLastPathComponent())
@@ -156,6 +160,57 @@ private extension MarkdownRenderer {
         defer { free(rendered) }
 
         return String(cString: rendered)
+    }
+
+    /// Walks every `<h1>`…`<h6>` in the rendered HTML and injects
+    /// `id="slug"` using GitHub's slug algorithm (lowercase, letters + digits
+    /// + spaces + hyphens + underscores kept, everything else dropped, spaces
+    /// → hyphens). Duplicates get `-1`, `-2` suffixes in document order.
+    /// This is what makes in-document `[…](#anchor)` links resolve.
+    static func addHeadingAnchors(in html: String) -> String {
+        let pattern = #"<(h[1-6])>(.*?)</\1>"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) else {
+            return html
+        }
+
+        let ns = html as NSString
+        let matches = regex.matches(in: html, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return html }
+
+        // Forward pass to compute slugs; dedup counts must follow document order.
+        var seen: [String: Int] = [:]
+        let slugs: [String] = matches.map { match in
+            let inner = ns.substring(with: match.range(at: 2))
+            let plain = inner.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+            let decoded = htmlEntityDecode(plain)
+            var slug = slugify(decoded)
+            if slug.isEmpty { slug = "section" }
+            let count = seen[slug, default: 0]
+            seen[slug] = count + 1
+            return count == 0 ? slug : "\(slug)-\(count)"
+        }
+
+        // Inject in reverse so earlier NSRanges stay valid against `result`.
+        var result = html
+        for (i, match) in matches.enumerated().reversed() {
+            let tagName = ns.substring(with: match.range(at: 1))
+            let openingNSRange = NSRange(location: match.range.location, length: tagName.count + 2)
+            guard let openingRange = Range(openingNSRange, in: result) else { continue }
+            result.replaceSubrange(openingRange, with: "<\(tagName) id=\"\(slugs[i])\">")
+        }
+        return result
+    }
+
+    static func slugify(_ text: String) -> String {
+        var out = ""
+        for ch in text.lowercased() {
+            if ch.isLetter || ch.isNumber || ch == "-" || ch == "_" {
+                out.append(ch)
+            } else if ch.isWhitespace {
+                out.append("-")
+            }
+        }
+        return out
     }
 }
 
