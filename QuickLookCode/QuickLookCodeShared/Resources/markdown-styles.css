@@ -1,39 +1,41 @@
 /* QuickLookCode — Markdown stylesheet
-   Prose follows the active VS Code theme's isDark flag (MarkdownRenderer
-   adds class="dark" to <body> when the code theme is dark), not the system
-   light/dark setting.
-   Code blocks use inline style= from the VS Code theme and always override. */
+   Prose colors come from the active VS Code theme:
+     • --md-bg / --md-fg are injected by MarkdownRenderer as an inline style
+       on <body> using theme.background / theme.foreground.
+     • All other shades (border, muted, code-bg, table-alt, …) are derived
+       from fg+bg via color-mix() so they track whatever theme is active.
+     • --md-link stays a fixed GitHub blue (swapped light/dark via body.dark
+       class) — theme-derived link colors too often come out unreadable.
+   Fenced code blocks still use inline style= from the VS Code theme and
+   always override the block's background/foreground. */
 
-/* ── Light mode defaults ─────────────────────────────────────────────────── */
 body {
-    --md-bg:             #ffffff;
-    --md-fg:             #1f2328;
-    --md-muted:          #636c76;
-    --md-code-bg:        rgba(175, 184, 193, 0.2);
-    --md-code-fg:        #1f2328;
-    --md-border:         #d1d9e0;
-    --md-blockquote:     #636c76;
-    --md-link:           #0969da;
-    --md-heading-border: #d1d9e0;
-    --md-table-alt:      #f6f8fa;
-    --md-hr:             #d1d9e0;
-    color-scheme:        light;
+    /* ── Derived shades (shared across light and dark themes) ────────── */
+    --md-border:         color-mix(in srgb, var(--md-fg) 15%, var(--md-bg));
+    --md-heading-border: color-mix(in srgb, var(--md-fg) 12%, var(--md-bg));
+    --md-hr:             color-mix(in srgb, var(--md-fg) 12%, var(--md-bg));
+    --md-code-bg:        color-mix(in srgb, var(--md-fg) 8%,  var(--md-bg));
+    --md-table-alt:      color-mix(in srgb, var(--md-fg) 5%,  var(--md-bg));
+    --md-muted:          color-mix(in srgb, var(--md-fg) 55%, var(--md-bg));
+    --md-blockquote:     color-mix(in srgb, var(--md-fg) 55%, var(--md-bg));
+    --md-code-fg:        var(--md-fg);
+
+    /* ── Light defaults ──────────────────────────────────────────────
+       These --md-bg / --md-fg values are fallbacks used when Swift hasn't
+       injected an inline style (e.g. theme failed to load). In normal
+       operation the inline style on <body> overrides them. */
+    --md-bg:       #ffffff;
+    --md-fg:       #1f2328;
+    --md-link:     #0969da;
+    color-scheme:  light;
 }
 
 /* ── Dark mode (theme.isDark on the active VS Code theme) ───────────────── */
 body.dark {
-    --md-bg:             #0d1117;
-    --md-fg:             #e6edf3;
-    --md-muted:          #848d97;
-    --md-code-bg:        rgba(110, 118, 129, 0.4);
-    --md-code-fg:        #e6edf3;
-    --md-border:         #30363d;
-    --md-blockquote:     #848d97;
-    --md-link:           #58a6ff;
-    --md-heading-border: #21262d;
-    --md-table-alt:      #161b22;
-    --md-hr:             #21262d;
-    color-scheme:        dark;
+    --md-bg:       #0d1117;
+    --md-fg:       #e6edf3;
+    --md-link:     #58a6ff;
+    color-scheme:  dark;
 }
 
 /* ── Reset & base ────────────────────────────────────────────────────────── */

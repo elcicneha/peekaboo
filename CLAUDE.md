@@ -64,7 +64,32 @@ The re-sign also strips the team-scoped entitlements: `com.apple.security.applic
 
 End-user install requires stripping the quarantine xattr — see the four-line Terminal block in `README.md`. This is the full install story; do not add installer scripts or DMG packaging without a specific reason (previously considered and rejected — DMG adds signing complications with zero UX benefit when there's no notarization).
 
-To bump a release: edit `MARKETING_VERSION` in `project.pbxproj` → run `scripts/package.sh` → upload the resulting zip.
+To bump a release: see the **Release Cadence** section below.
+
+## Release Cadence
+
+After completing a non-trivial batch of changes (a feature, a set of related fixes, a docs pass), **proactively ask the user whether it's time to cut a release** — but don't ask after every individual commit. Wait for natural checkpoints where a user would notice something new, improved, or fixed.
+
+Current released version: see the latest tag on GitHub (`git tag --sort=-v:refname | head -1`). First release was `v1.0.0`.
+
+**Version bump (SemVer — `MAJOR.MINOR.PATCH`):**
+- **PATCH** (e.g. 1.0.0 → 1.0.1) — bug fixes only, no user-visible new capability.
+- **MINOR** (e.g. 1.0.0 → 1.1.0) — new feature or user-visible improvement, backwards-compatible.
+- **MAJOR** (e.g. 1.0.0 → 2.0.0) — breaking change to preview pipeline semantics, install procedure, or user-visible settings. Rare.
+
+**When proposing a release, name the recommended version + one-line justification** (e.g. *"IDE picker added — v1.0.0 → v1.1.0"*). The user decides; don't assume.
+
+**Release steps (once the user approves):**
+
+1. Bump `MARKETING_VERSION` in `QuickLookCode/QuickLookCode.xcodeproj/project.pbxproj` — six occurrences (3 targets × Debug/Release). Use Edit with `replace_all`.
+2. `git add` the pbxproj, commit as `chore: release vX.Y.Z`.
+3. `git tag vX.Y.Z && git push origin main && git push origin vX.Y.Z`.
+4. `./scripts/package.sh` → produces `dist/Peekaboo-vX.Y.Z.zip`.
+5. Draft release notes in `RELEASE_NOTES_vX.Y.Z.md`. Sections: one-sentence pitch, install block (the four-line quarantine-strip sequence from README.md), highlights (3–6 bullets of what's new since last release), known limitations if any. **Skip the SHA-256 section** — it's ceremony for this setup (see git history of v1.0.0 for the reasoning). Add it back only if publishing to a package manager (Homebrew, etc.).
+6. `gh release create vX.Y.Z dist/Peekaboo-vX.Y.Z.zip --draft --title "vX.Y.Z — <short summary>" --notes-file RELEASE_NOTES_vX.Y.Z.md`.
+7. User reviews the draft in the browser and publishes manually. **Always pass `--draft`**; never publish on the user's behalf.
+
+The `RELEASE_NOTES_vX.Y.Z.md` file is throwaway — it exists only to feed `gh release create`. Delete it or `.gitignore` the `RELEASE_NOTES_v*.md` pattern after publishing.
 
 ## Architecture
 
@@ -174,6 +199,19 @@ The wrap overlay's colors come from CSS custom properties (`--wrap-bg`, `--wrap-
 
 The toolbar is hidden / scaled down in the Finder column-view preview and shown at full size in the dedicated Quick Look window.
 
+### Theme color propagation
+
+Both markdown previews and code previews use the active VS Code theme's colors for every surface (prose, code blocks, toolbar pill). The plumbing is spread across three files; here is the map:
+
+1. **`<body class="dark">` toggle** — added by both `MarkdownRenderer.assembleHTML` and `HTMLRenderer.render` when `theme.isDark` is true. Picks the GitHub-blue link-color variant in `markdown-styles.css` and the `color-scheme: dark;` hint.
+2. **`<body style="--md-bg: …; --md-fg: …">`** — `MarkdownRenderer` sets these CSS custom properties from `theme.background` / `theme.foreground`. Every other prose shade (`--md-border`, `--md-muted`, `--md-code-bg`, `--md-table-alt`, `--md-hr`, `--md-blockquote`, `--md-heading-border`) is derived in `markdown-styles.css` via `color-mix(in srgb, var(--md-fg) N%, var(--md-bg))`. The CSS file contains *fallback* values for `--md-bg`/`--md-fg` only; normal operation uses the inline style.
+3. **Toolbar pill** (`ToolbarRenderer.css`) — background, border, pill container, label color, active/hover states all derive from `--md-bg` / `--md-fg` via `color-mix()` too. No `@media` or light/dark override blocks — the same formulas work in both modes.
+4. **Wrap overlay button** (`ToolbarRenderer.wrapColorVariables`) — deliberately NOT theme-derived. Uses a fixed dark or light `--wrap-*` palette picked by `theme.isDark`. Intentional: the overlay is meant to read as a floating chrome control that's distinct from the code bg in every theme. See the preceding section — color-mixing the wrap overlay was tried and rejected.
+
+**Link color** stays GitHub blue (`#0969da` light / `#58a6ff` dark, gated by `body.dark`) — theme-derived link colors too often land on shades that are unreadable against the prose bg.
+
+**When adding new rendered surfaces**, use `color-mix(in srgb, var(--md-fg) N%, var(--md-bg))` rather than hardcoded rgba or per-theme lookup tables. The only non-theme-derived shades in the codebase are the wrap overlay palettes (above) and the GitHub-blue link color.
+
 **Xcode 16+ `fileSystemSynchronizedGroups`**: The project uses this feature, so adding or removing source files on disk is sufficient — no `project.pbxproj` edits are needed.
 
 **Vendored C libraries**: Two C libraries are vendored under `QuickLookCodeShared/Vendor/`:
@@ -195,7 +233,7 @@ The extension uses **view-based preview** (`QLIsDataBasedPreview: false` in `Inf
 - **Phase 1** (IDE Integration) ✅ — IDELocator, GrammarLoader, ThemeLoader complete; ContentView shows live theme info
 - **Phase 2** (Tokenization + HTML output) ✅ — JSC-based vscode-textmate pipeline, HTMLRenderer, FileTypeRegistry
 - **Phase 2.5** (Native library migration) ✅ — `tokenizeLine2` for internal color resolution; native oniguruma C library replacing JS regex shim; `TokenMapper` deleted
-- **Phase 3** (Markdown renderer with cmark-gfm) ✅ — `MarkdownRenderer.swift`, `markdown-styles.css`, cmark-gfm vendored; prose follows system light/dark, code blocks use VS Code theme
+- **Phase 3** (Markdown renderer with cmark-gfm) ✅ — `MarkdownRenderer.swift`, `markdown-styles.css`, cmark-gfm vendored; prose and toolbar chrome both follow the active VS Code theme (via `--md-bg` / `--md-fg` + `color-mix()`), code blocks use inline theme colors
 - **Phase 4** (`.ts` TypeScript preview) — **not achievable** via QL extension API; see PLAN.md
 - **Phase 4.5** (Performance — multi-layer caching) ✅ — `CacheManager`, `TokenizerEngine` actor, `SharedWebProcessPool`, grammar index, pre-serialized theme JSON, host app Refresh button
 - **Phase 5** (FSEventStream theme watching, font sync, line numbers) — planned

@@ -387,7 +387,7 @@ private extension MarkdownRenderer {
         #ql-view-code pre { border-radius: 0; margin-bottom: 0; }
         </style>
         </head>
-        <body\(theme.isDark ? " class=\"dark\"" : "")>
+        <body\(theme.isDark ? " class=\"dark\"" : "") style="--md-bg: \(theme.background); --md-fg: \(theme.foreground)">
         \(ToolbarRenderer.toggleInputsHTML)
         \(ToolbarRenderer.wordWrapCheckboxHTML)
         \(ToolbarRenderer.toolbarHTML)

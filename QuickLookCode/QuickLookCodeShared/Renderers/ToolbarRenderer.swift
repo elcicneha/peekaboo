@@ -86,12 +86,17 @@ public enum ToolbarRenderer {
         }
 
         /* ── Toolbar ──────────────────────────────────────────────────── */
+        /* Chrome shades derive from the active VS Code theme via color-mix:
+           --md-bg and --md-fg are set by MarkdownRenderer on <body> from
+           theme.background / theme.foreground. All toolbar colors are
+           foreground-tinted overlays on the page bg, so they track any
+           theme (light, dark, Solarized, Dracula, …) automatically. */
         #ql-toolbar {
             flex-shrink: 0;
 
-            background: rgba(28, 28, 28, 0.96);
+            background: color-mix(in srgb, var(--md-fg) 6%, var(--md-bg));
             -webkit-backdrop-filter: blur(20px) saturate(180%);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+            border-bottom: 1px solid color-mix(in srgb, var(--md-fg) 10%, var(--md-bg));
             display: flex;
             align-items: center;
             justify-content: flex-end;
@@ -108,7 +113,7 @@ public enum ToolbarRenderer {
         /* ── Pill / segmented control ─────────────────────────────────── */
         .ql-pill {
             display: flex;
-            background: rgba(255, 255, 255, 0.08);
+            background: color-mix(in srgb, var(--md-fg) 8%, transparent);
             border-radius: 6px;
             padding: 2px;
             gap: 1px;
@@ -116,7 +121,7 @@ public enum ToolbarRenderer {
         .ql-pill label {
             display: inline-block;
             background: transparent;
-            color: rgba(255, 255, 255, 0.5);
+            color: color-mix(in srgb, var(--md-fg) 50%, var(--md-bg));
             font-size: 12px;
             font-weight: 500;
             padding: 3px 12px;
@@ -129,25 +134,25 @@ public enum ToolbarRenderer {
 
         /* Default active: Preview label */
         #ql-btn-preview {
-            background: rgba(255, 255, 255, 0.16);
-            color: rgba(255, 255, 255, 0.92);
+            background: color-mix(in srgb, var(--md-fg) 14%, transparent);
+            color: color-mix(in srgb, var(--md-fg) 92%, var(--md-bg));
         }
 
         /* When code radio is checked: Code becomes active, Preview becomes inactive */
         #ql-radio-code:checked ~ #ql-toolbar #ql-btn-preview {
             background: transparent;
-            color: rgba(255, 255, 255, 0.5);
+            color: color-mix(in srgb, var(--md-fg) 50%, var(--md-bg));
         }
         #ql-radio-code:checked ~ #ql-toolbar #ql-btn-code {
-            background: rgba(255, 255, 255, 0.16);
-            color: rgba(255, 255, 255, 0.92);
+            background: color-mix(in srgb, var(--md-fg) 14%, transparent);
+            color: color-mix(in srgb, var(--md-fg) 92%, var(--md-bg));
         }
 
         /* Hover: only the inactive button gets a hover highlight */
         #ql-radio-preview:checked ~ #ql-toolbar #ql-btn-code:hover,
         #ql-radio-code:checked   ~ #ql-toolbar #ql-btn-preview:hover {
-            background: rgba(255, 255, 255, 0.06);
-            color: rgba(255, 255, 255, 0.7);
+            background: color-mix(in srgb, var(--md-fg) 6%, transparent);
+            color: color-mix(in srgb, var(--md-fg) 70%, var(--md-bg));
         }
 
         /* ── Wrap button (fixed overlay, top-right edge) ──────────────── */
@@ -191,40 +196,6 @@ public enum ToolbarRenderer {
             background: var(--wrap-bg-checked);
             color: var(--wrap-fg-checked);
             border-color: var(--wrap-border-checked);
-        }
-
-        /* ── Light mode ───────────────────────────────────────────────────
-           Applies when <body> does NOT carry the .dark class. Swift adds the
-           class in the code-file HTML template (HTMLRenderer) and in the
-           markdown template (MarkdownRenderer) based on the active VS Code
-           theme's isDark flag, so the toolbar follows the code theme rather
-           than the system appearance. */
-        body:not(.dark) #ql-toolbar {
-            background: rgba(235, 235, 235, 0.97);
-            border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-        }
-        body:not(.dark) .ql-pill {
-            background: rgba(0, 0, 0, 0.07);
-        }
-        body:not(.dark) .ql-pill label {
-            color: rgba(0, 0, 0, 0.45);
-        }
-        body:not(.dark) #ql-btn-preview {
-            background: rgba(0, 0, 0, 0.11);
-            color: rgba(0, 0, 0, 0.85);
-        }
-        body:not(.dark) #ql-radio-code:checked ~ #ql-toolbar #ql-btn-preview {
-            background: transparent;
-            color: rgba(0, 0, 0, 0.45);
-        }
-        body:not(.dark) #ql-radio-code:checked ~ #ql-toolbar #ql-btn-code {
-            background: rgba(0, 0, 0, 0.11);
-            color: rgba(0, 0, 0, 0.85);
-        }
-        body:not(.dark) #ql-radio-preview:checked ~ #ql-toolbar #ql-btn-code:hover,
-        body:not(.dark) #ql-radio-code:checked   ~ #ql-toolbar #ql-btn-preview:hover {
-            background: rgba(0, 0, 0, 0.05);
-            color: rgba(0, 0, 0, 0.6);
         }
 
         /* ── Narrow viewport (Column View preview pane) ───────────────── */
