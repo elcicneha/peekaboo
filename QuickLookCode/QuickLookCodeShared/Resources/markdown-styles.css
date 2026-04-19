@@ -95,38 +95,31 @@ ul, ol { margin-top: 0; margin-bottom: 16px; padding-left: 2em; }
 li + li { margin-top: 4px; }
 li > p { margin-top: 16px; }
 
-/* ── Task list checkboxes ────────────────────────────────────────────────── */
-input[type="checkbox"] {
+/* ── Task list checkboxes (GFM) ──────────────────────────────────────────
+   cmark-gfm emits <li><input type="checkbox" disabled> ... </li> with no
+   class, so we key off "<li> with a direct <input> child" via :has().      */
+.markdown-body li:has(> input[type="checkbox"]) { list-style: none; }
+
+.markdown-body input[type="checkbox"] {
     appearance: none;
     -webkit-appearance: none;
-    width: 1em;
-    height: 1em;
-    border: 1.5px solid var(--md-border);
+    width: 1.2em;
+    height: 1.2em;
+    margin: 0 0.2em 0 -1.2em;
+    vertical-align: -0.15em;
+    border: 1px solid var(--md-border);
     border-radius: 3px;
-    vertical-align: middle;
-    position: relative;
-    top: -1px;
-    margin-right: 6px;
     background: var(--md-bg);
-    flex-shrink: 0;
+    opacity: 1;
 }
 
-input[type="checkbox"]:checked {
-    background: var(--md-link);
+.markdown-body input[type="checkbox"]:checked {
+    background-color: var(--md-link);
     border-color: var(--md-link);
-}
-
-input[type="checkbox"]:checked::after {
-    content: "";
-    position: absolute;
-    left: 2px;
-    top: -1px;
-    width: 5px;
-    height: 9px;
-    border: 2px solid white;
-    border-top: none;
-    border-left: none;
-    transform: rotate(45deg);
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M3.5 8l3 3 6-6.5'/></svg>");
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 0.85em;
 }
 
 /* ── Blockquotes ─────────────────────────────────────────────────────────── */
