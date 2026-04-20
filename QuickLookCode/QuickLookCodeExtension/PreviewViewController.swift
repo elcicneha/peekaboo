@@ -8,7 +8,7 @@ import Quartz
 import WebKit
 import QuickLookCodeShared
 
-class PreviewViewController: NSViewController, QLPreviewingController {
+class PreviewViewController: NSViewController, QLPreviewingController, WKNavigationDelegate {
 
     private var webView: WKWebView!
     private var pendingHTML: String?
@@ -29,6 +29,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         webView.wantsLayer = true
         webView.layer?.cornerRadius = 6
         webView.layer?.masksToBounds = true
+        webView.navigationDelegate = self
         container.addSubview(webView)
         self.view = container
     }
@@ -39,6 +40,18 @@ class PreviewViewController: NSViewController, QLPreviewingController {
             webView.loadHTMLString(html, baseURL: nil)
             pendingHTML = nil
         }
+    }
+
+    // After each page load, stretch <pre> to fill the scroll container so that
+    // scroll events fire over the full viewport, not just the code lines.
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        webView.evaluateJavaScript("""
+            (function(){
+                var qc = document.getElementById('ql-content');
+                var pre = qc && qc.querySelector('pre');
+                if (pre && qc) pre.style.minHeight = qc.offsetHeight + 'px';
+            })();
+        """)
     }
 
     func preparePreviewOfFile(at url: URL) async throws {
