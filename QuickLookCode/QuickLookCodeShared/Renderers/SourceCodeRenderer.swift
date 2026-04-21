@@ -3,14 +3,12 @@
 //  QuickLookCodeShared
 //
 //  Tokenizes source code via vscode-textmate (running inside a shared TokenizerEngine
-//  actor), then builds a syntax-highlighted HTML page using the active VS Code/Antigravity theme.
-//
-//  The JSContext is created once per process inside TokenizerEngine.shared. This file is
-//  responsible only for reading the source file, delegating tokenization, and building HTML.
+//  actor). Callers receive [[RawToken]] and feed them to TextKitRenderer for NSTextView
+//  display.
 //
 
 import Foundation
-import JavaScriptCore  // needed for JSValue in parseResult
+import JavaScriptCore
 
 // MARK: - Public API
 
@@ -37,47 +35,6 @@ public enum SourceCodeRenderer {
             case .themeSerializationFailed:    return "Could not serialize theme for tokenizer"
             }
         }
-    }
-
-    // MARK: Entry point
-
-    /// Renders `fileURL` as a syntax-highlighted HTML page.
-    public static func render(
-        fileURL: URL,
-        grammarData: Data,
-        siblingGrammars: [Data] = [],
-        theme: ThemeData,
-        languageInfo: FileTypeRegistry.LanguageInfo,
-        fileName: String
-    ) async throws -> Data {
-        let (content, truncationNote) = readFile(at: fileURL)
-
-        let rawLines = try await tokenize(
-            code: content,
-            language: languageInfo.grammarSearch,
-            grammarData: grammarData,
-            siblingGrammars: siblingGrammars,
-            theme: theme
-        )
-
-        let spanLines: [[HTMLRenderer.TokenSpan]] = rawLines.map { line in
-            line.map { raw in
-                HTMLRenderer.TokenSpan(
-                    text: raw.text,
-                    color: raw.color,
-                    fontStyle: raw.fontStyle
-                )
-            }
-        }
-
-        let html = HTMLRenderer.render(
-            lines: spanLines,
-            theme: theme,
-            languageDisplayName: languageInfo.displayName,
-            fileName: fileName,
-            truncationNote: truncationNote
-        )
-        return Data(html.utf8)
     }
 
     // MARK: - File reading + size guard

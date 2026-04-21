@@ -32,20 +32,17 @@ public enum MarkdownRenderer {
     }
 
     /// Fast-path render output. `html` is the full self-contained document ready
-    /// for `WKWebView.loadHTMLString`; the Code tab inside it starts with a cheap
-    /// plain-text placeholder. `markdown` is the raw source the caller should feed
-    /// into `renderSourceHTML` to replace that placeholder asynchronously after
-    /// the initial paint.
+    /// for `WKWebView.loadHTMLString`. `markdown` is the raw source the caller
+    /// feeds into `tokenizeSource` to populate the native Source tab asynchronously.
     public struct RenderResult {
         public let html: Data
         public let markdown: String
     }
 
     /// Fast path: renders a Markdown file to a self-contained prose-only HTML
-    /// document (no Source-tab toggle; that is handled natively by
-    /// MarkdownPreviewController). The returned `markdown` string is the raw
-    /// source the caller feeds into `tokenizeSource` to populate the native
-    /// Source tab asynchronously.
+    /// document. The Source tab is handled natively by MarkdownPreviewController.
+    /// The returned `markdown` string is fed into `tokenizeSource` to populate
+    /// the native Source tab asynchronously.
     public static func render(
         fileURL: URL,
         theme: ThemeData,
@@ -126,15 +123,6 @@ public enum MarkdownRenderer {
         )
     }
 
-    /// Legacy path retained for API compatibility. Use `tokenizeSource` instead —
-    /// the native NSTextView Source tab no longer injects HTML into the WebView.
-    public static func renderSourceHTML(
-        markdown: String,
-        theme: ThemeData,
-        ide: IDEInfo
-    ) async -> String {
-        await generateSourceHTML(markdown: markdown, theme: theme, ide: ide)
-    }
 }
 
 // MARK: - File reading
@@ -383,58 +371,6 @@ private extension MarkdownRenderer {
         return """
         <pre style="background:var(--md-code-bg);color:\(theme.foreground)"><code \
         class="language-\(lang)" style="display:block">\(codeHTML)</code></pre>
-        """
-    }
-
-    /// Renders the raw markdown source as a syntax-highlighted `<pre>` block,
-    /// used for the Source tab in the toolbar toggle.
-    static func generateSourceHTML(markdown: String, theme: ThemeData, ide: IDEInfo) async -> String {
-        let plainFallback = "<pre style=\"background:\(theme.background);color:\(theme.foreground)\">"
-            + "<code>\(escapeHTML(markdown))</code></pre>"
-
-        guard let langInfo = FileTypeRegistry.language(forExtension: "md") else { return plainFallback }
-
-        let grammarLoader = GrammarLoader(ide: ide)
-        guard let grammarData = try? grammarLoader.grammarData(for: langInfo.grammarSearch) else { return plainFallback }
-
-        // Load grammars for every fenced language so vscode-textmate can highlight
-        // embedded code blocks with their own language colors in the Code view.
-        var siblingGrammars: [Data] = grammarLoader.siblingGrammarData(for: langInfo.grammarSearch)
-        var loadedScopes = Set<String>()
-        for lang in extractFencedLanguages(from: markdown) {
-            let fencedLangInfo = FileTypeRegistry.language(forCodeFenceTag: lang)
-            guard !loadedScopes.contains(fencedLangInfo.grammarSearch) else { continue }
-            loadedScopes.insert(fencedLangInfo.grammarSearch)
-            if let gData = try? grammarLoader.grammarData(for: fencedLangInfo.grammarSearch) {
-                siblingGrammars.append(gData)
-                siblingGrammars.append(contentsOf: grammarLoader.siblingGrammarData(for: fencedLangInfo.grammarSearch))
-            }
-        }
-
-        guard let rawLines = try? await SourceCodeRenderer.tokenize(
-            code: markdown,
-            language: langInfo.grammarSearch,
-            grammarData: grammarData,
-            siblingGrammars: siblingGrammars,
-            theme: theme
-        ) else { return plainFallback }
-
-        let codeHTML = rawLines.map { line in
-            let content = line.map { token -> String in
-                let escaped = escapeHTML(token.text)
-                var styles: [String] = []
-                if let c = token.color     { styles.append("color:\(c)") }
-                if token.fontStyle?.contains("bold") == true      { styles.append("font-weight:bold") }
-                if token.fontStyle?.contains("italic") == true    { styles.append("font-style:italic") }
-                if token.fontStyle?.contains("underline") == true { styles.append("text-decoration:underline") }
-                guard !styles.isEmpty else { return escaped }
-                return "<span style=\"\(styles.joined(separator: ";"))\">\(escaped)</span>"
-            }.joined()
-            return "<span class=\"line\">\(content)</span>"
-        }.joined()
-
-        return """
-        <pre style="background:\(theme.background);color:\(theme.foreground);margin:0;padding:16px 20px;font-family:ui-monospace,'SF Mono',Menlo,Monaco,Consolas,'Courier New',monospace;font-size:13px;line-height:1.6"><code style="display:block">\(codeHTML)</code></pre>
         """
     }
 

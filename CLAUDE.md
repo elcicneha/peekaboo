@@ -199,14 +199,14 @@ The JS bundle (`tokenizer-jsc.js`) is built via esbuild from `tokenizer/src/toke
 
 **NativeCodePreviewController** wraps an `NSScrollView + NSTextView` (TextKit1 stack with explicit `NSTextStorage / NSLayoutManager / NSTextContainer`). Wrap toggle changes `textContainer.size.width` between `CGFloat.greatestFiniteMagnitude` (no wrap) and the scroll view's content width (wrap). A native `NSButton` overlay in the top-right corner drives the toggle.
 
-### In-preview chrome (Markdown WKWebView only)
+### In-preview chrome
 
-`ToolbarRenderer` generates HTML/CSS for the two affordances inside the **markdown prose WKWebView** (`MarkdownPreviewController`):
+Two affordances are rendered natively (no HTML/CSS toolbar):
 
-- **Preview/Code pill** (`NSSegmentedControl`) — native AppKit control in `MarkdownPreviewController`; switches between `WKWebView` (prose) and `NSTextView` (source) visibility. No longer a CSS radio-input hack.
-- **Wrap overlay** — native `NSButton` inside `NativeCodePreviewController` and `MarkdownPreviewController`'s source `NSTextView` container. The WKWebView prose tab has no wrap button.
+- **Preview/Code pill** (`NSSegmentedControl`) — native AppKit control in `MarkdownPreviewController`; switches between `WKWebView` (prose) and `NSTextView` (source) visibility.
+- **Wrap overlay** (`WrapButton: NSButton` subclass) — inside `NativeCodePreviewController` and `MarkdownPreviewController`'s source `NSTextView` container. Colors are set as hardcoded light/dark `NSColor` values keyed on `theme.isDark` — deliberately not theme-derived so the button reads as a distinct floating chrome control. The WKWebView prose tab has no wrap button.
 
-The toolbar is hidden / scaled down in the Finder column-view preview and shown at full size in the dedicated Quick Look window.
+The pill and wrap button are hidden / scaled down in the Finder column-view preview and shown at full size in the dedicated Quick Look window.
 
 ### Theme color propagation
 
@@ -214,8 +214,8 @@ Both markdown previews and code previews use the active VS Code theme's colors f
 
 1. **`<body class="dark">` toggle** — added by both `MarkdownRenderer.assembleHTML` and `HTMLRenderer.render` when `theme.isDark` is true. Picks the GitHub-blue link-color variant in `markdown-styles.css` and the `color-scheme: dark;` hint.
 2. **`<body style="--md-bg: …; --md-fg: …">`** — `MarkdownRenderer` sets these CSS custom properties from `theme.background` / `theme.foreground`. Every other prose shade (`--md-border`, `--md-muted`, `--md-code-bg`, `--md-table-alt`, `--md-hr`, `--md-blockquote`, `--md-heading-border`) is derived in `markdown-styles.css` via `color-mix(in srgb, var(--md-fg) N%, var(--md-bg))`. The CSS file contains *fallback* values for `--md-bg`/`--md-fg` only; normal operation uses the inline style.
-3. **Toolbar pill** (`ToolbarRenderer.css`) — background, border, pill container, label color, active/hover states all derive from `--md-bg` / `--md-fg` via `color-mix()` too. No `@media` or light/dark override blocks — the same formulas work in both modes.
-4. **Wrap overlay button** (`ToolbarRenderer.wrapColorVariables`) — deliberately NOT theme-derived. Uses a fixed dark or light `--wrap-*` palette picked by `theme.isDark`. Intentional: the overlay is meant to read as a floating chrome control that's distinct from the code bg in every theme. See the preceding section — color-mixing the wrap overlay was tried and rejected.
+3. **Toolbar pill** (`NSSegmentedControl` in `MarkdownPreviewController`) — AppKit adapts segment control appearance to the window's `NSAppearance` (set from `theme.isDark`); no custom CSS needed.
+4. **Wrap overlay button** (`WrapButton` in `NativeCodePreviewController`) — deliberately NOT theme-derived. Uses hardcoded `NSColor` light/dark palettes picked by `theme.isDark`. Intentional: the overlay is meant to read as a floating chrome control that's distinct from the code bg in every theme. Color-mixing the wrap overlay was tried and rejected.
 
 **Link color** stays GitHub blue (`#0969da` light / `#58a6ff` dark, gated by `body.dark`) — theme-derived link colors too often land on shades that are unreadable against the prose bg.
 
