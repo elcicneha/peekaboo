@@ -43,6 +43,33 @@ After the page loads, read `#ql-content.offsetHeight` (the actual rendered pixel
 
 ---
 
+## Right-edge padding on horizontal scroll
+
+**Problem**: When a code line overflows the viewport horizontally, the rightmost character is flush with the window edge at maximum scroll position. The left edge has 20px padding (from `pre { padding-left: 20px }`); the right edge has none.
+
+**Root cause**: CSS padding on the trailing (right) edge of block elements does not extend the scrollable overflow area in WebKit. This is a long-standing WebKit behaviour — the scroll container's extent is determined by the content box of descendants, not their padding boxes on the trailing edge. `body { display: flex }` (set by `ToolbarRenderer.css`) makes this worse by changing how overflow propagates through the layout tree.
+
+**What did NOT work**:
+
+| Approach | Why it failed |
+|---|---|
+| `pre { padding: 16px 20px }` (original) | Right padding not included in WebKit scroll extent |
+| `pre { padding-right: 0 }` + `.line { padding-right: 20px }` | Block-level `padding-right` on `.line` does not extend scroll width in WebKit |
+| `html { padding-right: 20px }` | `box-sizing: border-box` (global rule) makes the padding shrink `html`'s content area instead of adding to scroll width |
+| `code { display: block; width: max-content; min-width: 100%; padding-right: 20px; box-sizing: content-box }` | `body { display: flex; flex-direction: column }` constrains the flex item (`#ql-content`) cross-axis width; overflow did not propagate to the scroll container as expected |
+| `.line::after { content: ''; display: inline-block; width: 20px }` | The inline-block `::after` extended each line's inline width, but the scroll container still did not account for it |
+
+| `pre { margin-right: 20px }` | Child margins should extend scroll overflow per spec; did not work in this WKWebView setup |
+| `evaluateJavaScript` in `didFinish`: read `pre.scrollWidth`, set `pre.style.width = scrollWidth + 20 + 'px'` inline | Same pattern that fixed the vertical scroll issue; `pre` became wider but scroll container still didn't expose the extra 20px |
+
+**Not attempted**:
+- `pre { border-right: 20px solid transparent }` — borders are part of the border box (unlike padding) and may genuinely extend scroll extent; untried.
+- `webView.scrollView.contentInsets` — `WKWebView` on macOS does not expose a `scrollView` property (iOS-only API); native inset control unavailable.
+
+**Decision**: dropped. The left-edge padding is consistent and the right-flush behaviour is a minor cosmetic issue. Revisit if a clean solution emerges.
+
+---
+
 ## JavaScript availability in Quick Look WKWebView
 
 `ToolbarRenderer.swift` has a comment "Quick Look's WebView has JavaScript disabled". This is **incorrect** — JS is enabled by default in WKWebView and Quick Look does not disable it. The comment was written to justify the CSS-only toggle approach, not from empirical testing.
