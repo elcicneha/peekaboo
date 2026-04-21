@@ -23,6 +23,12 @@ final class MarkdownPreviewController: NSViewController {
 
     private var isSourceWrapping = false
     private var currentTheme: ThemeData?
+    private var toolbarHeightConstraint: NSLayoutConstraint!
+    private var separatorHeightConstraint: NSLayoutConstraint!
+    private var columnViewApplied = false
+
+    private var isColumnView: Bool { view.bounds.width > 0 && view.bounds.width < 480 }
+    private var fontSize: CGFloat { isColumnView ? 8 : 13 }
 
     // MARK: - View setup
 
@@ -105,12 +111,15 @@ final class MarkdownPreviewController: NSViewController {
         root.addSubview(scrollView)
         root.addSubview(wrapButton)
 
+        toolbarHeightConstraint    = toolbarBar.heightAnchor.constraint(equalToConstant: 34)
+        separatorHeightConstraint  = toolbarSeparator.heightAnchor.constraint(equalToConstant: 1)
+
         NSLayoutConstraint.activate([
             // Toolbar
             toolbarBar.topAnchor.constraint(equalTo: root.topAnchor),
             toolbarBar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             toolbarBar.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            toolbarBar.heightAnchor.constraint(equalToConstant: 34),
+            toolbarHeightConstraint,
 
             segmentedControl.centerXAnchor.constraint(equalTo: toolbarBar.centerXAnchor),
             segmentedControl.centerYAnchor.constraint(equalTo: toolbarBar.centerYAnchor),
@@ -119,7 +128,7 @@ final class MarkdownPreviewController: NSViewController {
             toolbarSeparator.topAnchor.constraint(equalTo: toolbarBar.bottomAnchor),
             toolbarSeparator.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             toolbarSeparator.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            toolbarSeparator.heightAnchor.constraint(equalToConstant: 1),
+            separatorHeightConstraint,
 
             // WebView (prose)
             webView.topAnchor.constraint(equalTo: toolbarSeparator.bottomAnchor),
@@ -141,6 +150,23 @@ final class MarkdownPreviewController: NSViewController {
         self.view = root
     }
 
+    // MARK: - Column view
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        guard !columnViewApplied, view.bounds.width > 0 else { return }
+        columnViewApplied = true
+        let narrow = isColumnView
+        toolbarHeightConstraint.constant   = narrow ? 0 : 34
+        separatorHeightConstraint.constant = narrow ? 0 : 1
+        toolbarBar.isHidden       = narrow
+        toolbarSeparator.isHidden = narrow
+        if narrow {
+            wrapButton.isHidden = true
+            sourceTextView.textContainerInset = NSSize(width: 6, height: 8)
+        }
+    }
+
     // MARK: - Content
 
     /// Loads prose HTML into the WKWebView and applies theme colors to the toolbar.
@@ -152,7 +178,7 @@ final class MarkdownPreviewController: NSViewController {
 
     /// Shows plain-text in the source NSTextView while deferred tokenization runs.
     func showSourcePlaceholder(_ text: String, theme: ThemeData) {
-        let font    = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        let font    = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
         let bgColor = NSColor(cssHex: theme.background) ?? .textBackgroundColor
         let fgColor = NSColor(cssHex: theme.foreground) ?? .labelColor
         let paragraphStyle = NSMutableParagraphStyle()
@@ -172,14 +198,16 @@ final class MarkdownPreviewController: NSViewController {
 
     /// Replaces source tab content with syntax-highlighted attributed string.
     func showSource(tokens: [[SourceCodeRenderer.RawToken]], theme: ThemeData) {
-        let font    = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        let font    = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
         let bgColor = NSColor(cssHex: theme.background) ?? .textBackgroundColor
         let attrStr = TextKitRenderer.attributedString(lines: tokens, theme: theme, font: font)
         sourceTextView.backgroundColor = bgColor
         scrollView.backgroundColor     = bgColor
         sourceTextView.textStorage?.setAttributedString(attrStr)
-        if segmentedControl.selectedSegment == 1 {
-            sourceTextView.scrollToBeginningOfDocument(nil)
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.segmentedControl.selectedSegment == 1 else { return }
+            self.scrollView.contentView.scroll(to: .zero)
+            self.scrollView.reflectScrolledClipView(self.scrollView.contentView)
         }
     }
 

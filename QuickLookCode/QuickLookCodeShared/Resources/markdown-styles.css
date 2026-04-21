@@ -200,3 +200,9 @@ img {
     height: auto;
     border-radius: 4px;
 }
+
+/* ── Column View (narrow Finder sidebar preview) ─────────────────────────── */
+@media (max-width: 480px) {
+    html { zoom: 0.5; }
+    .markdown-body { padding: 16px; }
+}

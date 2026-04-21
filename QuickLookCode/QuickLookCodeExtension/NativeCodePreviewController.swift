@@ -26,6 +26,10 @@ final class NativeCodePreviewController: NSViewController {
     private var wrapButton: NSButton!
     private var isWrapping = false
     private var currentTheme: ThemeData?
+    private var columnViewApplied = false
+
+    private var isColumnView: Bool { view.bounds.width > 0 && view.bounds.width < 480 }
+    private var fontSize: CGFloat { isColumnView ? 8 : 13 }
 
     // MARK: - View setup
 
@@ -93,7 +97,7 @@ final class NativeCodePreviewController: NSViewController {
     /// Shows a plain-text placeholder immediately while tokenization runs in background.
     func showPlainText(_ text: String, theme: ThemeData) {
         currentTheme = theme
-        let font    = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        let font    = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
         let bgColor = NSColor(cssHex: theme.background) ?? .textBackgroundColor
         let fgColor = NSColor(cssHex: theme.foreground) ?? .labelColor
         applyBackground(bgColor)
@@ -106,7 +110,7 @@ final class NativeCodePreviewController: NSViewController {
             .paragraphStyle:  paragraphStyle,
         ]
         textView.textStorage?.setAttributedString(NSAttributedString(string: text, attributes: attrs))
-        textView.scrollToBeginningOfDocument(nil)
+        scrollToTopLeft()
         styleWrapButton()
     }
 
@@ -117,15 +121,40 @@ final class NativeCodePreviewController: NSViewController {
         truncationNote: String?
     ) {
         currentTheme = theme
-        let font    = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        let font    = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
         let bgColor = NSColor(cssHex: theme.background) ?? .textBackgroundColor
         let attrStr = TextKitRenderer.attributedString(
             lines: tokens, theme: theme, font: font, truncationNote: truncationNote
         )
         applyBackground(bgColor)
         textView.textStorage?.setAttributedString(attrStr)
-        textView.scrollToBeginningOfDocument(nil)
+        scrollToTopLeft()
         styleWrapButton()
+    }
+
+    private func scrollToTopLeft() {
+        // Defer until after the layout pass that resizes the text view completes.
+        // Calling scrollToBeginningOfDocument synchronously is a no-op because the
+        // layout manager hasn't recomputed glyph positions yet; deferring ensures
+        // the scroll sticks to the left edge.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.scrollView.contentView.scroll(to: .zero)
+            self.scrollView.reflectScrolledClipView(self.scrollView.contentView)
+        }
+    }
+
+    // MARK: - Column view
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        guard !columnViewApplied, view.bounds.width > 0 else { return }
+        columnViewApplied = true
+        let narrow = isColumnView
+        wrapButton.isHidden = narrow
+        if narrow {
+            textView.textContainerInset = NSSize(width: 6, height: 8)
+        }
     }
 
     // MARK: - Wrap toggle
