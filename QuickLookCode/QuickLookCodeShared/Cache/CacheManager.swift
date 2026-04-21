@@ -88,7 +88,19 @@ public enum CacheManager {
         // First bootstrap in this process, or a refresh notification arrived.
         let reason = isPopulated ? "reload-after-notification" : "first-bootstrap"
         let ok: Bool
-        if cacheIsValid() {
+
+        // Darwin notification on an ad-hoc (non-shared) cache means the host app
+        // rewrote ITS container; our container is untouched and stale. Force a
+        // rebuild so the extension picks up the change. On a shared App Group
+        // cache the host already wrote fresh bytes, so loadFromDisk suffices.
+        let forceRebuild = needsReload && !cacheIsShared
+
+        if forceRebuild {
+            clearInMemoryCaches()
+            ok = rebuildAndLoad()
+            NSLog("[QuickLookCode] CacheManager: %@ → rebuildAndLoad (unshared cache) ok=%d theme=%@",
+                  reason, ok ? 1 : 0, ThemeLoader._cachedTheme?.name ?? "nil")
+        } else if cacheIsValid() {
             ok = loadFromDisk()
             NSLog("[QuickLookCode] CacheManager: %@ → loadFromDisk ok=%d theme=%@",
                   reason, ok ? 1 : 0, ThemeLoader._cachedTheme?.name ?? "nil")
@@ -112,6 +124,15 @@ public enum CacheManager {
             _lock.unlock()
         }
         return ok
+    }
+
+    /// Touches the shared `TokenizerEngine` so its JSContext + 62 KB JS bundle eval
+    /// (60–150 ms cold) happens in parallel with other startup work instead of
+    /// serializing on the render path. Idempotent — the second call is a no-op.
+    /// The actor reference is internal to this module, so callers must go through
+    /// this public hook rather than touching `TokenizerEngine.shared` directly.
+    public static func prewarmTokenizer() {
+        _ = TokenizerEngine.shared
     }
 
     /// Forces a full cache rebuild. Call from the host app's Refresh button.
@@ -186,11 +207,34 @@ public enum CacheManager {
 
     // MARK: - Cache directory
 
-    /// Shared App Group container path for cache files.
+    /// Path where this process's on-disk cache lives.
+    ///
+    /// Prefers the App Group container when available (dev/Developer-ID builds) — that
+    /// lets the host app and extension share one cache so host's Refresh button is
+    /// visible to the extension via the Darwin notification + `loadFromDisk`.
+    ///
+    /// Falls back to the current process's sandbox cache dir for ad-hoc-signed
+    /// distributions, where the App Group entitlement is stripped. Each process then
+    /// keeps its own copy; cross-process Refresh stops sharing a cache, but the
+    /// extension still gets the huge win of persisting L3 across extension launches.
+    /// Cross-process invalidation in that mode is handled by forcing a rebuild when
+    /// a Darwin notification arrives (see `bootstrap`).
     public static var cacheDir: URL? {
+        if let group = FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: DiskCacheSchema.appGroup) {
+            return group.appendingPathComponent("Library/Caches/\(DiskCacheSchema.dirName)", isDirectory: true)
+        }
+        if let local = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
+            return local.appendingPathComponent(DiskCacheSchema.dirName, isDirectory: true)
+        }
+        return nil
+    }
+
+    /// True when `cacheDir` points at the App Group (shared between host app and
+    /// extension). False when using the per-process sandbox fallback.
+    private static var cacheIsShared: Bool {
         FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: DiskCacheSchema.appGroup)?
-            .appendingPathComponent("Library/Caches/\(DiskCacheSchema.dirName)", isDirectory: true)
+            .containerURL(forSecurityApplicationGroupIdentifier: DiskCacheSchema.appGroup) != nil
     }
 
     /// Timestamp of the last successful cache build, or nil if no cache exists.

@@ -13,6 +13,21 @@ class PreviewViewController: NSViewController, QLPreviewingController, WKNavigat
     private var webView: WKWebView!
     private var pendingHTML: String?
 
+    /// Set by the markdown render path; consumed in `didFinish` to kick off the
+    /// deferred Code-tab tokenize. Nil for non-markdown files.
+    private var pendingSourceContext: MarkdownSourceContext?
+
+    private struct MarkdownSourceContext {
+        let markdown: String
+        let theme: ThemeData
+        let ide: IDEInfo
+    }
+
+    private struct PreviewPayload {
+        let html: String
+        let sourceContext: MarkdownSourceContext?
+    }
+
     override func loadView() {
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 900, height: 600))
         container.wantsLayer = true
@@ -43,7 +58,11 @@ class PreviewViewController: NSViewController, QLPreviewingController, WKNavigat
     }
 
     // After each page load, stretch <pre> to fill the scroll container so that
-    // scroll events fire over the full viewport, not just the code lines.
+    // scroll events fire over the full viewport, not just the code lines. Also
+    // the hook where the deferred markdown Code-tab tokenize kicks off — doing
+    // it here instead of inline in `preparePreviewOfFile` means the tokenizer's
+    // 100–200 ms cold init overlaps with WKWebView layout/paint, not the user's
+    // wait for first pixels.
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         webView.evaluateJavaScript("""
             (function(){
@@ -52,17 +71,50 @@ class PreviewViewController: NSViewController, QLPreviewingController, WKNavigat
                 if (pre && qc) pre.style.minHeight = qc.offsetHeight + 'px';
             })();
         """)
+
+        if let ctx = pendingSourceContext {
+            pendingSourceContext = nil
+            Task { @MainActor [weak self] in
+                let sourceHTML = await MarkdownRenderer.renderSourceHTML(
+                    markdown: ctx.markdown,
+                    theme: ctx.theme,
+                    ide: ctx.ide
+                )
+                guard let self, let webView = self.webView else { return }
+                // Use callAsyncJavaScript's argument bridge so the HTML string is
+                // passed as a JS value — no manual escaping, no injection risk.
+                _ = try? await webView.callAsyncJavaScript(
+                    "document.getElementById('ql-source-slot').innerHTML = html;",
+                    arguments: ["html": sourceHTML],
+                    in: nil,
+                    in: .defaultClient
+                )
+            }
+        }
     }
 
     func preparePreviewOfFile(at url: URL) async throws {
-        // Ensure the cache is populated before rendering. No-op after the first call.
+        // Pre-warm TokenizerEngine in parallel with the render path. Its 60–150 ms
+        // JSContext + bundle eval cost overlaps with bootstrap / cmark-gfm / theme
+        // load instead of serializing behind them. Cheap no-op if already warm.
+        Task.detached(priority: .userInitiated) { CacheManager.prewarmTokenizer() }
+
+        // Ensure the cache is populated before rendering. No-op after the first call
+        // in a process; on ad-hoc-signed builds where there's no App Group, the
+        // fallback disk cache lives in this process's sandbox container.
         CacheManager.bootstrap()
 
-        let html = await renderHTML(fileURL: url, fileName: url.lastPathComponent, ext: url.pathExtension)
+        if Task.isCancelled { return }
+
+        let payload = await renderHTML(fileURL: url, fileName: url.lastPathComponent, ext: url.pathExtension)
+
+        if Task.isCancelled { return }
+
         await MainActor.run {
-            pendingHTML = html
+            pendingSourceContext = payload.sourceContext
+            pendingHTML = payload.html
             if webView.window != nil {
-                webView.loadHTMLString(html, baseURL: nil)
+                webView.loadHTMLString(payload.html, baseURL: nil)
                 pendingHTML = nil
             }
         }
@@ -71,27 +123,31 @@ class PreviewViewController: NSViewController, QLPreviewingController, WKNavigat
     // MARK: - Render pipeline
 
     /// Attempts syntax-highlighted rendering; falls back to plain text on any failure.
-    private func renderHTML(fileURL: URL, fileName: String, ext: String) async -> String {
+    private func renderHTML(fileURL: URL, fileName: String, ext: String) async -> PreviewPayload {
         if ext == "md" || ext == "markdown" {
             return await renderMarkdown(fileURL: fileURL, fileName: fileName)
         }
 
         guard let langInfo = FileTypeRegistry.language(forExtension: ext) else {
-            return plainText(fileURL: fileURL, fileName: fileName, reason: "Unsupported file type")
+            return PreviewPayload(html: plainText(fileURL: fileURL, fileName: fileName, reason: "Unsupported file type"), sourceContext: nil)
         }
 
         guard let ide = IDELocator.preferred else {
-            return plainText(fileURL: fileURL, fileName: fileName, reason: "VS Code not found")
+            return PreviewPayload(html: plainText(fileURL: fileURL, fileName: fileName, reason: "VS Code not found"), sourceContext: nil)
         }
 
         let grammarLoader = GrammarLoader(ide: ide)
         guard let grammar = (try? grammarLoader.grammarData(for: langInfo.grammarSearch)) ?? nil else {
-            return plainText(fileURL: fileURL, fileName: fileName, reason: "Grammar not found for \(langInfo.displayName)")
+            return PreviewPayload(html: plainText(fileURL: fileURL, fileName: fileName, reason: "Grammar not found for \(langInfo.displayName)"), sourceContext: nil)
         }
         let siblingGrammars = grammarLoader.siblingGrammarData(for: langInfo.grammarSearch)
 
         guard let theme = try? ThemeLoader.loadActiveTheme(from: ide) else {
-            return plainText(fileURL: fileURL, fileName: fileName, reason: "Theme could not be loaded")
+            return PreviewPayload(html: plainText(fileURL: fileURL, fileName: fileName, reason: "Theme could not be loaded"), sourceContext: nil)
+        }
+
+        if Task.isCancelled {
+            return PreviewPayload(html: "", sourceContext: nil)
         }
 
         do {
@@ -103,29 +159,41 @@ class PreviewViewController: NSViewController, QLPreviewingController, WKNavigat
                 languageInfo: langInfo,
                 fileName: fileName
             )
-            return String(data: data, encoding: .utf8) ?? plainText(fileURL: fileURL, fileName: fileName, reason: "Render produced invalid UTF-8")
+            let html = String(data: data, encoding: .utf8) ?? plainText(fileURL: fileURL, fileName: fileName, reason: "Render produced invalid UTF-8")
+            return PreviewPayload(html: html, sourceContext: nil)
         } catch {
-            return plainText(fileURL: fileURL, fileName: fileName, reason: error.localizedDescription)
+            return PreviewPayload(html: plainText(fileURL: fileURL, fileName: fileName, reason: error.localizedDescription), sourceContext: nil)
         }
     }
 
-    private func renderMarkdown(fileURL: URL, fileName: String) async -> String {
+    private func renderMarkdown(fileURL: URL, fileName: String) async -> PreviewPayload {
         guard let ide = IDELocator.preferred else {
-            return plainText(fileURL: fileURL, fileName: fileName, reason: "VS Code not found")
+            return PreviewPayload(html: plainText(fileURL: fileURL, fileName: fileName, reason: "VS Code not found"), sourceContext: nil)
         }
         guard let theme = try? ThemeLoader.loadActiveTheme(from: ide) else {
-            return plainText(fileURL: fileURL, fileName: fileName, reason: "Theme could not be loaded")
+            return PreviewPayload(html: plainText(fileURL: fileURL, fileName: fileName, reason: "Theme could not be loaded"), sourceContext: nil)
         }
+
+        if Task.isCancelled {
+            return PreviewPayload(html: "", sourceContext: nil)
+        }
+
         do {
-            let data = try await MarkdownRenderer.render(
+            let result = try await MarkdownRenderer.render(
                 fileURL: fileURL,
                 theme: theme,
                 ide: ide,
                 fileName: fileName
             )
-            return String(data: data, encoding: .utf8) ?? plainText(fileURL: fileURL, fileName: fileName, reason: "Markdown render produced invalid UTF-8")
+            guard let html = String(data: result.html, encoding: .utf8) else {
+                return PreviewPayload(html: plainText(fileURL: fileURL, fileName: fileName, reason: "Markdown render produced invalid UTF-8"), sourceContext: nil)
+            }
+            return PreviewPayload(
+                html: html,
+                sourceContext: MarkdownSourceContext(markdown: result.markdown, theme: theme, ide: ide)
+            )
         } catch {
-            return plainText(fileURL: fileURL, fileName: fileName, reason: error.localizedDescription)
+            return PreviewPayload(html: plainText(fileURL: fileURL, fileName: fileName, reason: error.localizedDescription), sourceContext: nil)
         }
     }
 

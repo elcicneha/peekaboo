@@ -60,7 +60,7 @@ There is **no paid Apple Developer account**. The app is signed by Xcode with th
 
 **Ad-hoc re-sign step (critical)**: after `archive`, the script strips `embedded.provisionprofile` from the app and extension, then re-signs every bundle with `codesign -s -` (ad-hoc). Reason: the Personal Team embeds a development provisioning profile whose `ProvisionedDevices` list contains only the developer's Mac. On any other Mac the kernel refuses to launch with "QuickLookCode cannot be opened because of a problem". Ad-hoc signing has no team and no device list, so the binary runs anywhere.
 
-The re-sign also strips the team-scoped entitlements: `com.apple.security.application-groups`, `com.apple.developer.team-identifier`, `com.apple.application-identifier`. These cannot be used with an ad-hoc signature — a sandboxed app with an `application-groups` entitlement but no matching team will fail to launch. Practical consequence: `CacheManager`'s L3 disk cache (shared group container) is unreachable on end-users' machines; L2 in-memory and L1 per-render layers still function. Do not try to keep the App Group — it will re-break distribution.
+The re-sign also strips the team-scoped entitlements: `com.apple.security.application-groups`, `com.apple.developer.team-identifier`, `com.apple.application-identifier`. These cannot be used with an ad-hoc signature — a sandboxed app with an `application-groups` entitlement but no matching team will fail to launch. Practical consequence: the App Group *container* is unreachable on end-users' machines, so `CacheManager` falls back to per-process sandbox caches (see **Caching Architecture** below). Do not try to keep the App Group — it will re-break distribution.
 
 End-user install requires stripping the quarantine xattr — see the four-line Terminal block in `README.md`. This is the full install story; do not add installer scripts or DMG packaging without a specific reason (previously considered and rejected — DMG adds signing complications with zero UX benefit when there's no notarization).
 
@@ -129,7 +129,7 @@ IDELocator.preferred → IDEInfo (app URL, settings URL, extension paths)
 
 Any new file paths the extension needs to read must be added to both `QuickLookCode.entitlements` and `QuickLookCodeExtension.entitlements`, and constructed in code from `realHomeDirectory()` rather than `FileManager.default.homeDirectoryForCurrentUser`.
 
-**App Group**: `group.com.nehagupta.quicklookcode` — used for shared UserDefaults **and the disk cache** between app and extension. The cache lives at `<AppGroupContainer>/Library/Caches/quicklookcode/` and contains `manifest.json`, `ide.json`, `theme.json`, and `grammar-index.json`.
+**App Group**: `group.com.nehagupta.quicklookcode` — used for shared UserDefaults **and the disk cache** between app and extension *when the entitlement is present* (dev/Developer-ID builds). The cache lives at `<AppGroupContainer>/Library/Caches/quicklookcode/` and contains `manifest.json`, `ide.json`, `theme.json`, and `grammar-index.json`. On ad-hoc-signed builds the App Group is stripped and each process falls back to its own sandbox cache — see **Caching Architecture**.
 
 ### IDE Abstraction
 
@@ -146,7 +146,9 @@ Scope→color resolution is handled entirely by `vscode-textmate` internally via
 Three layers eliminate redundant work between previews:
 
 ```
-L3 — App Group disk cache (survives process death)
+L3 — On-disk cache (survives process death)
+     Primary location: App Group container (shared between host + extension)
+     Fallback:         the calling process's own sandbox caches dir
      CacheManager.bootstrap() reads or rebuilds on first call.
      Invalidated by: IDE app mtime change, settings.json mtime change, schema bump, Refresh button.
 
@@ -161,11 +163,15 @@ L1 — Per-render work (always runs)
 
 **CacheManager** (`Cache/CacheManager.swift`) orchestrates bootstrap and refresh. Call `CacheManager.bootstrap()` before every render — the hot path is a single atomic boolean check (`_loadedCacheVersion != nil && !_needsReload`), no disk I/O. The host app's **Refresh** button calls `CacheManager.refresh()` to force a full rebuild — use this after changing the IDE theme.
 
-**Cross-process invalidation via Darwin notifications**: the host app and Quick Look extension are separate processes with separate L2 singletons. `CacheManager.refresh()` rebuilds L3 locally, then posts a Darwin notification (`CFNotificationCenterGetDarwinNotifyCenter`). Every process that called `bootstrap()` installs a `CFNotificationCenterAddObserver` on first call; the handler flips `_needsReload` so the next `bootstrap()` swaps L2 from the fresh L3 with one `loadFromDisk()`, then returns to the fast path. No polling, microsecond latency.
+**L3 location**: `CacheManager.cacheDir` prefers the App Group container; on ad-hoc-signed builds (no App Group entitlement) `containerURL(forSecurityApplicationGroupIdentifier:)` returns nil and it falls back to `FileManager.urls(for: .cachesDirectory, in: .userDomainMask)` — each sandboxed process's own `~/Library/Containers/<bundle-id>/Data/Library/Caches/quicklookcode/`. Without this fallback, end-users' extensions would rebuild from a full extension-directory walk on every cold launch (theme registry + grammar search, 100–400 ms). Do not remove the fallback.
 
-**Notification name must be app-group-prefixed**: sandboxed macOS processes silently drop Darwin notifications whose name is not prefixed with an app-group identifier the process belongs to. The constant `CacheManager.cacheUpdatedNotification` is built as `"\(DiskCacheSchema.appGroup).cache-refreshed"` — do not rename to something outside the `group.com.nehagupta.quicklookcode.*` namespace or cross-process invalidation will break silently.
+**Cross-process invalidation via Darwin notifications**: the host app and Quick Look extension are separate processes with separate L2 singletons. `CacheManager.refresh()` rebuilds L3 locally, then posts a Darwin notification (`CFNotificationCenterGetDarwinNotifyCenter`). Every process that called `bootstrap()` installs a `CFNotificationCenterAddObserver` on first call; the handler flips `_needsReload` so the next `bootstrap()` either swaps L2 from the fresh L3 via one `loadFromDisk()` (shared-cache path) or force-rebuilds its own L3 (unshared-cache path, because each process writes its own container). Behaviour is selected at runtime by `cacheIsShared`. No polling, microsecond latency. On ad-hoc builds the notification is silently dropped by the sandbox (the name is app-group-prefixed but the process isn't in the group), so `mtime` checks against IDE app + `settings.json` become the sole invalidation signal — still correct for theme changes since VS Code rewrites `settings.json` when the user picks a new theme.
 
-**TokenizerEngine** (`Cache/TokenizerEngine.swift`) is a Swift `actor` that owns one `JSContext` for the process lifetime. `tokenizer-jsc.js` is evaluated once; oniguruma is bridged once. `initGrammar` is called only when language or theme changes between calls — browsing a folder of `.py` files hits `doTokenize` directly. Markdown code blocks all share the same warm context.
+**Notification name must be app-group-prefixed**: sandboxed macOS processes silently drop Darwin notifications whose name is not prefixed with an app-group identifier the process belongs to. The constant `CacheManager.cacheUpdatedNotification` is built as `"\(DiskCacheSchema.appGroup).cache-refreshed"` — do not rename to something outside the `group.com.nehagupta.quicklookcode.*` namespace or cross-process invalidation will break silently on the dev build too.
+
+**TokenizerEngine** (`Cache/TokenizerEngine.swift`) is a Swift `actor` that owns one `JSContext` for the process lifetime. `tokenizer-jsc.js` is evaluated once (60–150 ms cold); oniguruma is bridged once. `initGrammar` is called only when language or theme changes between calls — browsing a folder of `.py` files hits `doTokenize` directly. Markdown code blocks all share the same warm context.
+
+**Pre-warm hook**: `PreviewViewController.preparePreviewOfFile` launches `Task.detached { CacheManager.prewarmTokenizer() }` before calling `bootstrap()`. This overlaps the JSContext init + JS bundle eval with the bootstrap / theme-load / cmark-gfm work instead of serializing after them. `TokenizerEngine` itself is internal to the shared framework; `prewarmTokenizer()` is the public hook.
 
 ### Tokenization Pipeline
 
@@ -226,6 +232,19 @@ Both vendor directories are added to `SWIFT_INCLUDE_PATHS` and `USER_HEADER_SEAR
 The extension uses **view-based preview** (`QLIsDataBasedPreview: false` in `Info.plist`). `PreviewViewController` loads the rendered HTML into a `WKWebView`. View-based was chosen to enable keyboard shortcut support and future interactive affordances (the earlier data-based path using `QLPreviewReply(.html)` has been removed).
 
 **WKWebView entitlement**: the sandboxed `WKWebView` requires `com.apple.security.network.client` in both entitlement files even when only loading local HTML strings — without it the web content process crashes silently and the preview renders blank.
+
+### Markdown two-phase render
+
+For `.md` / `.markdown` files the visible markdown preview is decoupled from the Code-tab source view:
+
+1. **Fast phase** — `MarkdownRenderer.render(...)` returns a `RenderResult { html, markdown }`. The `html` contains the fully-rendered prose (cmark-gfm + fenced-block highlighting), plus a **cheap plain-text placeholder** inside `<div id="ql-source-slot">` for the Code tab. No tokenizer work for the Source tab. `WKWebView.loadHTMLString` fires immediately.
+2. **Deferred phase** — in `WKNavigationDelegate.webView(_:didFinish:)`, the VC reads the `MarkdownSourceContext` stashed during the fast phase, calls `MarkdownRenderer.renderSourceHTML(markdown:theme:ide:)` on a Task, and injects the tokenized `<pre><code>` fragment via `webView.callAsyncJavaScript("document.getElementById('ql-source-slot').innerHTML = html;", arguments: ["html": sourceHTML], …)`. WKWebView's argument bridge passes the HTML as a JS value — no hand-escaping, no injection surface.
+
+**Why the slot lives inside `#ql-view-code`**: the wrap overlay button (`ToolbarRenderer.wordWrapOverlayHTML`) is a DOM sibling of the slot inside `#ql-view-code`. Targeting `innerHTML` of the whole `#ql-view-code` would wipe the wrap button. The slot isolates the swap to just the source-view content.
+
+**Why placeholder uses `.line` spans with matching `<pre>` styling**: the word-wrap CSS rule (`#ql-wrap:checked ~ #ql-content .line { white-space: pre-wrap }`) keys off `.line`. The tokenized version also emits `.line` spans, so wrap state carries over the swap without layout jump.
+
+**Task cancellation**: `preparePreviewOfFile` and its sub-renderers check `Task.isCancelled` at each await-boundary. When Quick Look dismisses a preview mid-render (user hits space again quickly), the in-flight task bails early instead of fighting for the `TokenizerEngine` actor queue against the replacement preview. Do not drop these checks.
 
 ## Current Status
 

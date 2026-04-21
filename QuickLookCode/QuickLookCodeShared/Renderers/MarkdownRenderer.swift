@@ -31,13 +31,28 @@ public enum MarkdownRenderer {
         }
     }
 
-    /// Renders a Markdown file to a self-contained UTF-8 HTML document.
+    /// Fast-path render output. `html` is the full self-contained document ready
+    /// for `WKWebView.loadHTMLString`; the Code tab inside it starts with a cheap
+    /// plain-text placeholder. `markdown` is the raw source the caller should feed
+    /// into `renderSourceHTML` to replace that placeholder asynchronously after
+    /// the initial paint.
+    public struct RenderResult {
+        public let html: Data
+        public let markdown: String
+    }
+
+    /// Fast path: renders a Markdown file to a self-contained UTF-8 HTML document.
+    ///
+    /// Deliberately does NOT tokenize the raw markdown source for the Code tab —
+    /// that work (the dominant cost on a cold extension launch for small files)
+    /// is deferred to `renderSourceHTML`, which the caller runs off the critical
+    /// path and injects via `callAsyncJavaScript` once the WebView has painted.
     public static func render(
         fileURL: URL,
         theme: ThemeData,
         ide: IDEInfo,
         fileName: String
-    ) async throws -> Data {
+    ) async throws -> RenderResult {
         // 1. Read source
         guard let markdown = readMarkdown(at: fileURL) else {
             throw RendererError.fileUnreadable
@@ -71,12 +86,29 @@ public enum MarkdownRenderer {
             throw RendererError.cssNotFound
         }
 
-        // 6. Generate syntax-highlighted source view
-        let sourceHTML = await generateSourceHTML(markdown: markdown, theme: theme, ide: ide)
+        // 6. Cheap placeholder for the Code tab — same <pre>/<code> shape as the
+        // tokenized version so the swap is visually seamless.
+        let placeholderSource = placeholderSourceHTML(markdown: markdown, theme: theme)
 
         // 7. Assemble final document
-        let html = assembleHTML(body: resolvedHTML, sourceHTML: sourceHTML, css: css, fileName: fileName, theme: theme)
-        return Data(html.utf8)
+        let html = assembleHTML(body: resolvedHTML, sourceHTML: placeholderSource, css: css, fileName: fileName, theme: theme)
+        return RenderResult(html: Data(html.utf8), markdown: markdown)
+    }
+
+    /// Deferred path: tokenizes the raw markdown source and returns an HTML
+    /// fragment (a `<pre><code>` block with `.line` spans and inline-styled
+    /// token spans) suitable for:
+    /// ```js
+    /// document.getElementById('ql-source-slot').innerHTML = fragment
+    /// ```
+    /// Runs the JS tokenizer — only call AFTER the initial HTML has reached
+    /// WKWebView so this cost overlaps with layout/paint.
+    public static func renderSourceHTML(
+        markdown: String,
+        theme: ThemeData,
+        ide: IDEInfo
+    ) async -> String {
+        await generateSourceHTML(markdown: markdown, theme: theme, ide: ide)
     }
 }
 
@@ -381,6 +413,18 @@ private extension MarkdownRenderer {
         """
     }
 
+    /// Plain-text Code-tab content used during the initial paint, before the
+    /// tokenizer finishes. Uses `.line` spans so the word-wrap toggle behaves
+    /// identically to the highlighted version — no layout jump on swap.
+    static func placeholderSourceHTML(markdown: String, theme: ThemeData) -> String {
+        let lineSpans = markdown.components(separatedBy: "\n").map { line in
+            "<span class=\"line\">\(escapeHTML(line))</span>"
+        }.joined()
+        return """
+        <pre style="background:\(theme.background);color:\(theme.foreground);margin:0;padding:16px 20px;font-family:ui-monospace,'SF Mono',Menlo,Monaco,Consolas,'Courier New',monospace;font-size:13px;line-height:1.6"><code style="display:block">\(lineSpans)</code></pre>
+        """
+    }
+
     /// Returns the unique set of language tags from fenced code blocks (``` or ~~~).
     static func extractFencedLanguages(from markdown: String) -> [String] {
         let pattern = #"^(?:```|~~~)(\w\S*)"#
@@ -519,7 +563,7 @@ private extension MarkdownRenderer {
           </div>
           <div id="ql-view-code">
           \(ToolbarRenderer.wordWrapOverlayHTML)
-          \(sourceHTML)
+          <div id="ql-source-slot">\(sourceHTML)</div>
           </div>
         </div>
         </body>

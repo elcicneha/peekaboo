@@ -93,3 +93,64 @@ In WKWebView (and WebKit generally), children of an element with `overflow: auto
 This also applies to `flex: 1` on a child of a flex item that has `overflow: auto` — the child does not grow to fill the scroll container.
 
 The only reliable way to fill a scroll container to its rendered height is to read `offsetHeight` via JavaScript at runtime and set an explicit pixel value as an inline style.
+
+---
+
+## L3 disk cache on ad-hoc-signed builds
+
+**Problem**: end-users install via the quarantine-stripped zip from GitHub Releases. The packaging pipeline strips the App Group entitlement (it can't coexist with ad-hoc signing — see CLAUDE.md "Distribution"). With App Group gone, `FileManager.containerURL(forSecurityApplicationGroupIdentifier:)` returns `nil`, and `CacheManager.cacheDir` would be `nil` on every end-user machine.
+
+**What the original implementation did**: gated all disk cache reads/writes on `cacheDir != nil`. On ad-hoc builds this silently turned into a no-op — every cold extension launch ran the full `rebuildAndLoad` path (full `/Applications/<IDE>.app/.../extensions/` walk for theme registry + per-language grammar directory search), then discarded the result. Cold-launch first-render for a 4-line `.md` was 400–1150 ms, dominated by filesystem walks that re-ran from scratch each time the system killed the idle extension host.
+
+**What did NOT work (considered and rejected)**:
+
+| Approach | Why not |
+|---|---|
+| Keep the App Group entitlement | Ad-hoc signing + `com.apple.security.application-groups` is a hard launch failure; would re-break distribution. See CLAUDE.md "Ad-hoc re-sign step" — this is non-negotiable. |
+| Write L3 into the framework bundle's Resources dir | Read-only after code signing; cache writes would fail. |
+| Warm the L2 singletons from the host app over XPC at extension launch | NSExtensionContext does not provide a bidirectional XPC channel on Quick Look extensions. Would require building a LaunchAgent; orders of magnitude more complexity for the same outcome. |
+
+**What works**: `cacheDir` falls back to `FileManager.urls(for: .cachesDirectory, in: .userDomainMask).first` inside the calling process's own sandbox container (`~/Library/Containers/<bundle-id>/Data/Library/Caches/quicklookcode/`). Every sandboxed process can read/write its own caches dir without any entitlement. The extension now persists L3 across cold launches on end-users' machines, same as the dev build.
+
+**Trade-off**: host app and extension no longer share one cache (different containers). Host's Refresh button rewrites only the host's L3; the extension's Darwin-notification handler therefore force-rebuilds its own L3 rather than `loadFromDisk`-ing stale data. Selected at runtime via `cacheIsShared`. In practice end-users rarely open the host app; `settings.json` mtime bumps still catch real theme changes automatically.
+
+**Do not revert to "bail out when App Group is unavailable"** — the speed cost on end-user machines is severe and compounds with every system-idle extension teardown.
+
+---
+
+## Deferred markdown Code-tab tokenization
+
+**Problem**: `MarkdownRenderer.render` originally called `generateSourceHTML` inline as step 6 of every render. `generateSourceHTML` loads the markdown grammar, loads sibling grammars for every fenced language in the doc, serializes the theme to `IRawTheme` JSON, warms the `TokenizerEngine` actor (62 KB JS eval in JSContext, ~60–150 ms cold), calls `initGrammar` (parse grammar + compile every regex via `onig_new`, ~30–70 ms), then tokenizes the whole markdown source. For a 4-line MD file with no code fences, that's 100–220 ms of wasted work to populate a Code-tab the user never clicks.
+
+**Why the Code tab can't just be thrown away**: users toggling Preview/Code is part of the advertised UX for the renderer; its absence is visible. The work has to happen eventually, just not before first paint.
+
+**What did NOT work**:
+
+| Approach | Why not |
+|---|---|
+| Return a plain-text `<pre>` for the Code tab, skip tokenization entirely | Code tab becomes non-highlighted raw markdown; breaks the "shows your editor colors" promise. |
+| Run `generateSourceHTML` inside `async let` in parallel with `highlightCodeBlocks` | Both funnel through the same `TokenizerEngine` actor; the actor serializes them. Wall-clock is unchanged. |
+| Pre-generate the Code-tab HTML on the host app's main process so the extension can load a pre-warmed L3 entry | Source HTML is per-file, not per-IDE; can't pre-compute. |
+
+**What works**: split the render into two phases.
+
+1. **Fast phase** in `MarkdownRenderer.render` now returns `RenderResult { html, markdown }`. `html` contains the fully-rendered preview plus a cheap plain-text placeholder (same `<pre>/<code>` shape + `.line` spans) inside `<div id="ql-source-slot">`. No tokenizer work for the Source tab. `WKWebView.loadHTMLString` fires immediately.
+2. **Deferred phase** in `PreviewViewController.webView(_:didFinish:)` after first paint: calls the new public `MarkdownRenderer.renderSourceHTML(markdown:theme:ide:)` and injects the tokenized fragment via `webView.callAsyncJavaScript("document.getElementById('ql-source-slot').innerHTML = html;", arguments: ["html": sourceHTML], …)`. The 100–220 ms of tokenizer init + `initGrammar` overlaps with WKWebView layout/paint and the user eyeballing the preview.
+
+**Why a dedicated `#ql-source-slot` div instead of targeting `#ql-view-code.innerHTML`**: the wrap overlay button (`ToolbarRenderer.wordWrapOverlayHTML`) is a DOM sibling of the slot inside `#ql-view-code`. Replacing `#ql-view-code.innerHTML` would wipe the wrap button on every markdown preview. The slot isolates the swap to just the source content.
+
+**Why `callAsyncJavaScript` with argument bridge instead of `evaluateJavaScript(String)`**: passing the HTML as a JS argument means WKWebView serializes it — no hand-escaping of backslashes/quotes/newlines in a multi-kilobyte string, and no opportunity for user-content (the raw markdown) to break out of a string literal.
+
+**Why the placeholder uses `.line` spans + the same `<pre>` inline styles as the tokenized version**: the word-wrap toggle keys off `.line`. If wrap is on when the swap happens, the layout must stay identical to avoid a visible jump. Placeholder and tokenized HTML share the exact `<pre>` style string for this reason.
+
+---
+
+## Task cancellation in the render pipeline
+
+**Problem**: rapid space-bar presses on successive files created overlapping `preparePreviewOfFile` calls. Each one hit the `TokenizerEngine` actor; dismissed previews kept running to completion because `async`/`await` does not auto-cancel. A burst of 3–4 rapid presses would stack tokenize requests on the actor's mailbox, each blocking the next, and Quick Look's own response deadline would eventually surface "Failed to load preview" for requests that couldn't get through in time.
+
+**What works**: `Task.isCancelled` checks at each await-boundary in `preparePreviewOfFile` / `renderHTML` / `renderMarkdown`. When QL cancels a preview, the in-flight task bails before doing the expensive work, leaving the actor free for the replacement preview.
+
+**Why `if Task.isCancelled { return }` not `try Task.checkCancellation()`**: throwing from `preparePreviewOfFile` makes Quick Look show its own "Failed to load preview" banner — user sees an error instead of a blank-then-swap. Silent early-return avoids the error UI; QL drops the empty result on the floor because it's already moved on.
+
+**Do not drop these checks.** They are the difference between "rapid space-press works" and "rapid space-press degrades into stuck failures."
