@@ -12,7 +12,7 @@ enum DiskCacheSchema {
 
     // Increment this when any Codable struct below changes OR when the on-disk
     // index needs to be rebuilt for any reason (e.g. fixing grammar resolution).
-    static let schemaVersion = 4
+    static let schemaVersion = 5
 
     static let appGroup = "group.com.nehagupta.quicklookcode"
     static let dirName  = "quicklookcode"
@@ -32,7 +32,10 @@ enum DiskCacheSchema {
         let builtAt: Double           // Date.timeIntervalSinceReferenceDate
         let ideAppPath: String
         let ideAppMtime: Double       // detect IDE app update (new built-in grammars/themes)
-        let settingsFileMtime: Double // detect active-theme name change in settings.json
+        /// Active theme name resolved at build time (settings.json, or state.vscdb
+        /// fallback). `cacheIsValid` compares this against a live re-read so a
+        /// theme change invalidates the cache regardless of which store holds it.
+        let activeThemeName: String?
     }
 
     // MARK: - IDE

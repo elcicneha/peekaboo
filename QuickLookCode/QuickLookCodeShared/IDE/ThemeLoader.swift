@@ -87,16 +87,20 @@ public enum ThemeLoader {
 
         // 1. If the user has set workbench.colorTheme, resolve that name via the
         //    extension registry (id, label, or filename/JSON-name fallback for
-        //    non-conforming themes).
-        if let themeName = readActiveThemeName(settingsURL: ide.settingsURL) {
+        //    non-conforming themes). Tries settings.json first, then the
+        //    Electron state DB — VS Code writes the active theme to both, but
+        //    profile-specific settings, post-Settings-Sync resets, and
+        //    never-customized installs can leave settings.json empty while
+        //    state.vscdb still has the resolved theme.
+        if let themeName = resolveActiveThemeName(from: ide) {
             if let contribution = resolveTheme(named: themeName, in: registry) {
                 return try parseTheme(contribution: contribution)
             }
             throw LoadError.themeNotResolvable(themeName)
         }
 
-        // 2. No preference set: pick the first dark theme from the IDE's bundled
-        //    theme-defaults extension. The choice is structural (first vs-dark
+        // 2. No preference set anywhere: pick the first dark theme from the IDE's
+        //    bundled theme-defaults extension. Structural choice (first vs-dark
         //    contribution in the IDE's own defaults) — no hardcoded theme name.
         let defaults = registry.filter { isThemeDefaults($0.path) }
         if let fallback = defaults.first(where: { $0.uiTheme == "vs-dark" }) ?? defaults.first {
@@ -104,6 +108,21 @@ public enum ThemeLoader {
         }
 
         throw LoadError.noThemesFound
+    }
+
+    /// Preferred source order for the active theme name:
+    /// `settings.json` first (canonical when present), falling back to the
+    /// Electron state DB. Used during rebuild and by `CacheManager.cacheIsValid`
+    /// to detect theme changes that touch only one of the two stores.
+    static func resolveActiveThemeName(from ide: IDEInfo) -> String? {
+        if let name = readActiveThemeName(settingsURL: ide.settingsURL) {
+            return name
+        }
+        if let name = VSCodeStateDB.activeThemeName(at: ide.stateDBURL) {
+            NSLog("[QuickLookCode] ThemeLoader: active theme %@ read from state.vscdb (settings.json had none)", name)
+            return name
+        }
+        return nil
     }
 
     // MARK: - Settings

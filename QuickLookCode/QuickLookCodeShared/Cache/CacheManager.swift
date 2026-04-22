@@ -269,17 +269,16 @@ public enum CacheManager {
             abs(ideMtime - manifest.ideAppMtime) < 2.0
         else { return false }
 
-        // settings.json mtime must match (detects theme-name change).
-        let settingsPath = dir.appendingPathComponent(DiskCacheSchema.ideFile)
-        if let ideData = try? Data(contentsOf: settingsPath),
-           let cachedIDE = try? JSONDecoder().decode(DiskCacheSchema.CachedIDE.self, from: ideData),
-           fm.fileExists(atPath: cachedIDE.settingsPath) {
-            if let attrs = try? fm.attributesOfItem(atPath: cachedIDE.settingsPath),
-               let mtime = (attrs[.modificationDate] as? Date)?.timeIntervalSinceReferenceDate,
-               abs(mtime - manifest.settingsFileMtime) > 2.0 {
-                return false
-            }
-        }
+        // Active theme name must still match (covers changes in settings.json OR
+        // state.vscdb — no mtime tracking needed since state.vscdb is touched
+        // on every VS Code UI action and its mtime is not a reliable signal).
+        let cachedIDEPath = dir.appendingPathComponent(DiskCacheSchema.ideFile)
+        guard
+            let ideData = try? Data(contentsOf: cachedIDEPath),
+            let cachedIDE = try? JSONDecoder().decode(DiskCacheSchema.CachedIDE.self, from: ideData)
+        else { return false }
+        let currentThemeName = ThemeLoader.resolveActiveThemeName(from: cachedIDE.toIDEInfo())
+        if currentThemeName != manifest.activeThemeName { return false }
 
         return true
     }
@@ -341,9 +340,10 @@ public enum CacheManager {
         // 3. Build the language index from every extension's package.json.
         let languageIndex = LanguageIndex.build(from: ide)
 
-        // 4. Determine mtimes for manifest.
-        let ideAppMtime    = mtime(of: ide.appURL.path)
-        let settingsMtime  = mtime(of: ide.settingsURL.path)
+        // 4. Resolve the active theme name so cacheIsValid can detect theme
+        //    changes (in either settings.json or state.vscdb) on next bootstrap.
+        let ideAppMtime = mtime(of: ide.appURL.path)
+        let activeThemeName = ThemeLoader.resolveActiveThemeName(from: ide)
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -397,7 +397,7 @@ public enum CacheManager {
             builtAt: Date().timeIntervalSinceReferenceDate,
             ideAppPath: ide.appURL.path,
             ideAppMtime: ideAppMtime,
-            settingsFileMtime: settingsMtime
+            activeThemeName: activeThemeName
         )
         if let data = try? encoder.encode(manifest) {
             try? data.write(

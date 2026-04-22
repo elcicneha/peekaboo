@@ -121,6 +121,7 @@ IDELocator.preferred → IDEInfo (app URL, settings URL, extension paths)
     │       grammarData(for: entry) → Data (TextMate JSON)
     │       siblingGrammarData(for: entry) → [Data] (other grammars from the same extension)
     └── ThemeLoader.loadActiveTheme(from: ide) → ThemeData
+            ├── resolveActiveThemeName: settings.json → state.vscdb (VSCodeStateDB, read-only SQLite)
             └── serializeTheme(ThemeData) → IRawTheme JSON → vscode-textmate registry.setTheme
 ```
 
@@ -141,6 +142,8 @@ Any new file paths the extension needs to read must be added to both `QuickLookC
 The project supports both **VS Code** and **Antigravity** (a VS Code fork). `IDEInfo` holds all paths for a given IDE. `IDELocator.preferred` returns the user's picker choice (stored in shared App Group `UserDefaults` under the `selectedIDE` key — visible to both host app and extension) when that IDE is installed; otherwise the first IDE found in catalog order. The host app's `ContentView` shows the picker only when ≥2 IDEs are installed. `ThemeLoader` takes an `IDEInfo` directly; `LanguageIndex` is built once per IDE at cache bootstrap and queried globally thereafter. Never hardcode VS Code paths.
 
 **Theme dark/light classification** (`ThemeLoader.classifyIsDark`): prefers the theme JSON's own `type` field if present, otherwise falls back to the `uiTheme` field from the extension's `package.json` contribution (`"vs"`/`"hc-light"` = light, everything else = dark). VS Code's built-in themes (e.g. `light_modern.json`) omit `type` entirely and rely on `uiTheme` — a naive `type ?? "dark"` default would mis-classify every one of them as dark.
+
+**Active theme name sources** (`ThemeLoader.resolveActiveThemeName`): reads `settings.json` first, falls back to `state.vscdb` (VS Code's Electron state DB). The state DB ships the user's currently-rendered theme even when settings.json has no `workbench.colorTheme` entry — profile users, post-Settings-Sync resets, and never-customized installs all leave settings.json empty while state.vscdb retains the resolved theme. `VSCodeStateDB` opens the DB read-only via `import SQLite3`, reads one row from `ItemTable`, parses the JSON value for `settingsId`. Only the theme name is taken from state.vscdb; the rest of the theme pipeline (file resolution, include chains, color map) runs identically to the settings.json path.
 
 ### Token Scope Matching
 
@@ -168,7 +171,9 @@ L3 — On-disk cache (survives process death)
      Fallback:         the calling process's own sandbox caches dir
      Files:            manifest.json, ide.json, theme.json, language-index.json
      CacheManager.bootstrap() reads or rebuilds on first call.
-     Invalidated by: IDE app mtime change, settings.json mtime change, schema bump, Refresh button.
+     Invalidated by: IDE app mtime change, active theme name change (compared via
+     `ThemeLoader.resolveActiveThemeName` — reads settings.json and state.vscdb),
+     schema bump, Refresh button.
 
 L2 — Process-lifetime in-memory singletons
      IDELocator._cached, ThemeLoader._cachedTheme / _cachedSerializedTheme,
@@ -183,7 +188,7 @@ L1 — Per-render work (always runs)
 
 **L3 location**: `CacheManager.cacheDir` prefers the App Group container; on ad-hoc-signed builds (no App Group entitlement) `containerURL(forSecurityApplicationGroupIdentifier:)` returns nil and it falls back to `FileManager.urls(for: .cachesDirectory, in: .userDomainMask)` — each sandboxed process's own `~/Library/Containers/<bundle-id>/Data/Library/Caches/quicklookcode/`. Without this fallback, end-users' extensions would rebuild from a full extension-directory walk on every cold launch (theme registry + language-index scan of every extension's `package.json`, 100–400 ms). Do not remove the fallback.
 
-**Cross-process invalidation via Darwin notifications**: the host app and Quick Look extension are separate processes with separate L2 singletons. `CacheManager.refresh()` rebuilds L3 locally, then posts a Darwin notification (`CFNotificationCenterGetDarwinNotifyCenter`). Every process that called `bootstrap()` installs a `CFNotificationCenterAddObserver` on first call; the handler flips `_needsReload` so the next `bootstrap()` either swaps L2 from the fresh L3 via one `loadFromDisk()` (shared-cache path) or force-rebuilds its own L3 (unshared-cache path, because each process writes its own container). Behaviour is selected at runtime by `cacheIsShared`. No polling, microsecond latency. On ad-hoc builds the notification is silently dropped by the sandbox (the name is app-group-prefixed but the process isn't in the group), so `mtime` checks against IDE app + `settings.json` become the sole invalidation signal — still correct for theme changes since VS Code rewrites `settings.json` when the user picks a new theme.
+**Cross-process invalidation via Darwin notifications**: the host app and Quick Look extension are separate processes with separate L2 singletons. `CacheManager.refresh()` rebuilds L3 locally, then posts a Darwin notification (`CFNotificationCenterGetDarwinNotifyCenter`). Every process that called `bootstrap()` installs a `CFNotificationCenterAddObserver` on first call; the handler flips `_needsReload` so the next `bootstrap()` either swaps L2 from the fresh L3 via one `loadFromDisk()` (shared-cache path) or force-rebuilds its own L3 (unshared-cache path, because each process writes its own container). Behaviour is selected at runtime by `cacheIsShared`. No polling, microsecond latency. On ad-hoc builds the notification is silently dropped by the sandbox (the name is app-group-prefixed but the process isn't in the group), so `cacheIsValid`'s checks against IDE app mtime + active theme name become the sole invalidation signal — still correct because the theme name is re-read from the live sources (settings.json + state.vscdb) on every validity check.
 
 **Notification name must be app-group-prefixed**: sandboxed macOS processes silently drop Darwin notifications whose name is not prefixed with an app-group identifier the process belongs to. The constant `CacheManager.cacheUpdatedNotification` is built as `"\(DiskCacheSchema.appGroup).cache-refreshed"` — do not rename to something outside the `group.com.nehagupta.quicklookcode.*` namespace or cross-process invalidation will break silently on the dev build too.
 

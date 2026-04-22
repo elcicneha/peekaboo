@@ -24,4 +24,14 @@ public struct IDEInfo {
 
     /// User settings file, e.g. ~/Library/Application Support/Antigravity/User/settings.json
     public let settingsURL: URL
+
+    /// VS Code's / Antigravity's Electron state database, used as the fallback
+    /// source for the active theme when `settings.json` has no `workbench.colorTheme`
+    /// (profile users, fresh installs, post-Settings-Sync resets). Always located
+    /// at `<User>/globalStorage/state.vscdb` — a sibling of `settings.json`.
+    public var stateDBURL: URL {
+        settingsURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("globalStorage/state.vscdb")
+    }
 }
