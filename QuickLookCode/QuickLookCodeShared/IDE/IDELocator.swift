@@ -40,6 +40,12 @@ public enum IDELocator {
             userExtensionsDirName: ".cursor",
             appSupportDirName: "Cursor"
         ),
+        Candidate(
+            name: "Windsurf",
+            appNames: ["Windsurf.app"],
+            userExtensionsDirName: ".windsurf",
+            appSupportDirName: "Windsurf"
+        ),
     ]
 
     // MARK: - In-memory cache (process lifetime)
