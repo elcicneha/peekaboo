@@ -85,7 +85,7 @@ struct ContentView: View {
             }
         }
         .padding()
-        .frame(minWidth: 360, minHeight: 180)
+        .frame(minWidth: 200, minHeight: 180)
         .task { await loadStatus() }
     }
 
