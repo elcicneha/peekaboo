@@ -34,6 +34,12 @@ public enum IDELocator {
             userExtensionsDirName: ".antigravity",
             appSupportDirName: "Antigravity"
         ),
+        Candidate(
+            name: "Cursor",
+            appNames: ["Cursor.app"],
+            userExtensionsDirName: ".cursor",
+            appSupportDirName: "Cursor"
+        ),
     ]
 
     // MARK: - In-memory cache (process lifetime)
