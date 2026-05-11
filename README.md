@@ -1,6 +1,6 @@
 # Peekaboo
 
-A macOS Quick Look extension that renders source code files with syntax highlighting, using your active VS Code theme.
+A macOS Quick Look extension that renders source code files with syntax highlighting, using your active editor theme.
 
 Press Space on any code file in Finder and get a preview that actually looks like your editor — correct colors, correct font, your theme.
 
@@ -9,11 +9,24 @@ Press Space on any code file in Finder and get a preview that actually looks lik
 ## Features
 
 - Syntax highlighting powered by the same TextMate grammar engine VS Code uses
-- Automatically picks up your active VS Code (or Antigravity) theme — change your theme in VS Code, hit Refresh, and the preview updates instantly
+- Automatically picks up your active editor theme — change it in your editor, hit Refresh, and the preview updates instantly
 - Markdown rendering with GFM support and syntax-highlighted code blocks
 - Works in both Quick Look panel and Finder column view
 
 <video src="https://github.com/user-attachments/assets/14b17a9c-baf1-414d-9901-4a204ab453db" autoplay loop muted playsinline></video>
+
+## Supported editors
+
+Peekaboo reads grammars and themes directly from any of these editors' install — no configuration needed. If you have more than one installed, pick the one to use from the host app's IDE picker.
+
+<table>
+  <tr>
+    <td align="center"><img src="resources/ide-logos/vscode.png" width="72" height="72" alt="VS Code logo"><br><sup>VS Code</sup></td>
+    <td align="center"><img src="resources/ide-logos/cursor.png" width="72" height="72" alt="Cursor logo"><br><sup>Cursor</sup></td>
+    <td align="center"><img src="resources/ide-logos/windsurf.png" width="72" height="72" alt="Windsurf logo"><br><sup>Windsurf</sup></td>
+    <td align="center"><img src="resources/ide-logos/antigravity.png" width="72" height="72" alt="Antigravity logo"><br><sup>Antigravity</sup></td>
+  </tr>
+</table>
 
 ## Installation
 

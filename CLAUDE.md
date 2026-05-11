@@ -127,7 +127,7 @@ IDELocator.preferred → IDEInfo (app URL, settings URL, extension paths)
 
 ### Key Constraints
 
-**Sandbox**: Both app and extension run sandboxed. Read access to VS Code / Antigravity install locations and user config dirs is granted via a single entitlement exception list — `com.apple.security.temporary-exception.files.absolute-path.read-only` — containing `/Applications/` and `/Users/`.
+**Sandbox**: Both app and extension run sandboxed. Read access to VS Code / Cursor / Windsurf / Antigravity install locations and user config dirs is granted via a single entitlement exception list — `com.apple.security.temporary-exception.files.absolute-path.read-only` — containing `/Applications/` and `/Users/`.
 
 **Why `/Users/` and not `home-relative-path` exceptions**: Apple's `com.apple.security.temporary-exception.files.home-relative-path.read-only` silently resolves paths against the *sandbox container home* (`~/Library/Containers/<bundle-id>/Data/`), not the user's real home — so `Library/Application Support/Code/` in that key grants access to a path that doesn't exist and the kernel denies the real read. The absolute-path `/Users/` prefix is resolved literally and covers every user's real home subtree. Do not switch back to home-relative paths.
 
@@ -139,7 +139,7 @@ Any new file paths the extension needs to read must be added to both `QuickLookC
 
 ### IDE Abstraction
 
-The project supports both **VS Code** and **Antigravity** (a VS Code fork). `IDEInfo` holds all paths for a given IDE. `IDELocator.preferred` returns the user's picker choice (stored in shared App Group `UserDefaults` under the `selectedIDE` key — visible to both host app and extension) when that IDE is installed; otherwise the first IDE found in catalog order. The host app's `ContentView` shows the picker only when ≥2 IDEs are installed. `ThemeLoader` takes an `IDEInfo` directly; `LanguageIndex` is built once per IDE at cache bootstrap and queried globally thereafter. Never hardcode VS Code paths.
+The project supports **VS Code**, **Cursor**, **Windsurf**, and **Antigravity** — all VS Code-derived IDEs that share the same extension layout, settings.json schema, and `state.vscdb` shape. `IDEInfo` holds all paths for a given IDE. `IDELocator.preferred` returns the user's picker choice (stored in shared App Group `UserDefaults` under the `selectedIDE` key — visible to both host app and extension) when that IDE is installed; otherwise the first IDE found in catalog order. The host app's `ContentView` shows the picker only when ≥2 IDEs are installed. `ThemeLoader` takes an `IDEInfo` directly; `LanguageIndex` is built once per IDE at cache bootstrap and queried globally thereafter. Never hardcode VS Code paths.
 
 **Theme dark/light classification** (`ThemeLoader.classifyIsDark`): prefers the theme JSON's own `type` field if present, otherwise falls back to the `uiTheme` field from the extension's `package.json` contribution (`"vs"`/`"hc-light"` = light, everything else = dark). VS Code's built-in themes (e.g. `light_modern.json`) omit `type` entirely and rely on `uiTheme` — a naive `type ?? "dark"` default would mis-classify every one of them as dark.
 
