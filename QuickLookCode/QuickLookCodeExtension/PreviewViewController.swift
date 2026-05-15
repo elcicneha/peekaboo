@@ -101,6 +101,14 @@ class PreviewViewController: NSViewController, QLPreviewingController {
 
         if Task.isCancelled { return }
 
+        // Some grammars (e.g. third-party MDX) can tokenize to an empty
+        // or whitespace-only result, which would wipe out the plain-text
+        // preview shown above. Keep the plain-text rendering in that case.
+        let hasContent = tokens.contains { line in
+            line.contains { !$0.text.isEmpty }
+        }
+        guard hasContent else { return }
+
         await MainActor.run { [weak codeVC] in
             codeVC?.display(tokens: tokens, theme: theme, truncationNote: truncationNote)
         }
@@ -160,21 +168,26 @@ class PreviewViewController: NSViewController, QLPreviewingController {
             let lines = text.components(separatedBy: "\n")
             content = lines.prefix(SourceCodeRenderer.maxLines).joined(separator: "\n")
         } else {
-            content = "// Could not read file."
+            content = ""
         }
 
-        let fallbackTheme = ThemeData(
-            name: "Fallback",
-            isDark: true,
-            background: "#1e1e1e",
-            foreground: "#d4d4d4",
-            tokenColors: []
-        )
+        // Prefer the user's active VS Code theme so the unhighlighted preview
+        // visually matches a normal Peekaboo render. Fall back to a baked-in
+        // dark palette only if no IDE / theme is available.
+        let theme: ThemeData = (IDELocator.preferred.flatMap { try? ThemeLoader.loadActiveTheme(from: $0) })
+            ?? ThemeData(
+                name: "Fallback",
+                isDark: true,
+                background: "#1e1e1e",
+                foreground: "#d4d4d4",
+                tokenColors: []
+            )
+        _ = reason
 
         let codeVC = NativeCodePreviewController()
         await MainActor.run {
             installChild(codeVC)
-            codeVC.showPlainText("// \(reason) — showing plain text\n\n\(content)", theme: fallbackTheme)
+            codeVC.showPlainText(content, theme: theme)
         }
     }
 }

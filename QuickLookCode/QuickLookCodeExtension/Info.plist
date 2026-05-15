@@ -39,9 +39,10 @@
 				<string>public.php-script</string>
 				<string>com.sun.java-source</string>
 
-				<!-- Markdown — system type (.md) + custom (.markdown) -->
+				<!-- Markdown — system type (.md) + custom (.markdown, .mdx) -->
 				<string>net.daringfireball.markdown</string>
 				<string>com.nehagupta.quicklookcode.markdown</string>
+				<string>com.nehagupta.quicklookcode.mdx</string>
 
 				<!-- Xcode declares com.microsoft.typescript (apple-internal, trusted) for .ts and .tsx.
 				     Our custom UTType export loses, so we must also claim this type directly. -->
@@ -163,6 +164,26 @@
 				<key>public.filename-extension</key>
 				<array>
 					<string>markdown</string>
+				</array>
+			</dict>
+		</dict>
+
+		<!-- MDX (.mdx) — Markdown + JSX. Rendered as source code only; component JSX
+		     cannot be executed in a static Quick Look preview. -->
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.nehagupta.quicklookcode.mdx</string>
+			<key>UTTypeDescription</key>
+			<string>MDX Source</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>mdx</string>
 				</array>
 			</dict>
 		</dict>

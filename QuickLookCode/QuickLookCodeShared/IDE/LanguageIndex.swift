@@ -77,11 +77,42 @@ public enum LanguageIndex {
     /// Reads the grammar JSON for the given entry. Cached by path on the static
     /// data cache below so repeated previews don't re-read the same file.
     public static func grammarData(for entry: Entry) -> Data? {
-        if let cached = _dataCache[entry.grammarPath] { return cached }
-        let url = URL(fileURLWithPath: entry.grammarPath)
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        _dataCache[entry.grammarPath] = data
-        return data
+        return loadGrammarData(at: entry.grammarPath)
+    }
+
+    /// Reads a grammar file and normalizes its contents to JSON. VS Code grammar
+    /// files come in two formats: JSON (`.tmLanguage.json`, `.json`) and XML plist
+    /// (`.tmLanguage`, `.plist`). Our JS tokenizer only handles JSON, so any XML
+    /// plist input is converted in-process before being cached.
+    private static func loadGrammarData(at path: String) -> Data? {
+        if let cached = _dataCache[path] { return cached }
+        let url = URL(fileURLWithPath: path)
+        guard let raw = try? Data(contentsOf: url) else { return nil }
+        let normalized = convertPlistToJSONIfNeeded(raw) ?? raw
+        _dataCache[path] = normalized
+        return normalized
+    }
+
+    /// Returns JSON data for the grammar if the input is an XML/binary plist,
+    /// otherwise nil so the caller keeps the original JSON bytes.
+    private static func convertPlistToJSONIfNeeded(_ data: Data) -> Data? {
+        // Cheap sniff: skip leading whitespace, then peek the first non-space
+        // byte. JSON grammars start with `{`; plist grammars start with `<`
+        // (XML) or `bplist` (binary).
+        var idx = data.startIndex
+        while idx < data.endIndex, data[idx] == 0x20 || data[idx] == 0x09 || data[idx] == 0x0A || data[idx] == 0x0D {
+            idx = data.index(after: idx)
+        }
+        guard idx < data.endIndex else { return nil }
+        let first = data[idx]
+        let isPlist = (first == 0x3C /* '<' */) ||
+                      (data.starts(with: Data("bplist".utf8)))
+        guard isPlist else { return nil }
+
+        guard let obj = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) else {
+            return nil
+        }
+        return try? JSONSerialization.data(withJSONObject: obj, options: [])
     }
 
     /// All grammar data the tokenizer may need in addition to `entry`'s main grammar.
@@ -101,29 +132,85 @@ public enum LanguageIndex {
         var orderedPaths: [String] = []
         var seen = Set<String>()
         seen.insert(entry.grammarPath)
+        var visitedScopes = Set<String>([entry.scopeName])
 
-        // 1. Same-extension siblings
-        for path in snap.grammarsByExtension[entry.extensionRoot] ?? [] {
-            if seen.insert(path).inserted { orderedPaths.append(path) }
-        }
-
-        // 2 + 3. Injection grammars for this entry's scope + their same-extension siblings
-        let injectionScopes = snap.injectionsForTarget[entry.scopeName] ?? []
-        for injScope in injectionScopes {
-            guard let injPath = snap.byScopeName[injScope] else { continue }
-            if seen.insert(injPath).inserted { orderedPaths.append(injPath) }
-            guard let injExtRoot = snap.pathToExtensionRoot[injPath] else { continue }
-            for path in snap.grammarsByExtension[injExtRoot] ?? [] {
+        func addExtensionGrammars(_ extRoot: String) {
+            for path in snap.grammarsByExtension[extRoot] ?? [] {
                 if seen.insert(path).inserted { orderedPaths.append(path) }
             }
         }
 
-        return orderedPaths.compactMap { path in
-            if let cached = _dataCache[path] { return cached }
-            guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return nil }
-            _dataCache[path] = data
-            return data
+        // 1. Same-extension siblings
+        addExtensionGrammars(entry.extensionRoot)
+
+        // 2 + 3. Injection grammars for this entry's scope + their same-extension siblings
+        let injectionScopes = snap.injectionsForTarget[entry.scopeName] ?? []
+        for injScope in injectionScopes {
+            visitedScopes.insert(injScope)
+            guard let injPath = snap.byScopeName[injScope] else { continue }
+            if seen.insert(injPath).inserted { orderedPaths.append(injPath) }
+            if let injExtRoot = snap.pathToExtensionRoot[injPath] {
+                addExtensionGrammars(injExtRoot)
+            }
         }
+
+        // 4. Cross-extension `include` references — grammars like MDX pull in
+        // `source.tsx`, `source.js`, `text.html.basic`, etc. from VS Code's
+        // built-in extensions. Walk the include graph breadth-first with a
+        // depth cap so embedded-language highlighting works end-to-end.
+        var frontier: [String] = [entry.grammarPath] + orderedPaths
+        for _ in 0..<3 {
+            var newScopes: [String] = []
+            for path in frontier {
+                guard let data = loadGrammarData(at: path) else { continue }
+                for scope in extractIncludedScopes(from: data) {
+                    if visitedScopes.insert(scope).inserted {
+                        newScopes.append(scope)
+                    }
+                }
+            }
+            if newScopes.isEmpty { break }
+            var nextFrontier: [String] = []
+            for scope in newScopes {
+                guard let path = snap.byScopeName[scope] else { continue }
+                if seen.insert(path).inserted {
+                    orderedPaths.append(path)
+                    nextFrontier.append(path)
+                }
+                if let extRoot = snap.pathToExtensionRoot[path] {
+                    for sibPath in snap.grammarsByExtension[extRoot] ?? [] {
+                        if seen.insert(sibPath).inserted {
+                            orderedPaths.append(sibPath)
+                            nextFrontier.append(sibPath)
+                        }
+                    }
+                }
+            }
+            frontier = nextFrontier
+        }
+
+        return orderedPaths.compactMap { loadGrammarData(at: $0) }
+    }
+
+    /// Extracts foreign-scope `include` references from a TextMate grammar's
+    /// JSON bytes. Returns scope names like `source.tsx` or `text.html.basic`
+    /// (anything containing a dot). Local `#repository-key`, `$self`, and
+    /// `$base` references are skipped because they resolve within the same
+    /// grammar.
+    private static func extractIncludedScopes(from data: Data) -> [String] {
+        guard let text = String(data: data, encoding: .utf8) else { return [] }
+        let pattern = ##""include"\s*:\s*"([^"#$][^"#]*)"##
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let ns = text as NSString
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
+        var seen = Set<String>()
+        var out: [String] = []
+        for m in matches where m.numberOfRanges >= 2 {
+            let scope = ns.substring(with: m.range(at: 1))
+            guard scope.contains(".") else { continue }
+            if seen.insert(scope).inserted { out.append(scope) }
+        }
+        return out
     }
 
     /// The full target→injection-scopes map, to be passed to the tokenizer so
